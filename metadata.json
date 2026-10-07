@@ -1,0 +1,6 @@
+{
+  "name": "Dark.Talk",
+  "description": "Secure real-time messenger with WebSocket and HTTP support, groups, reactions, and 2FA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

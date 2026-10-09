@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,48 +45,50 @@ fun ConnectionBadge(
     val alpha by infiniteTransition.animateFloat(
         initialValue = 0.4f,
         targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(800, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
+        animationSpec = infiniteRepeatable(tween(800, easing = LinearEasing), RepeatMode.Reverse),
         label = "pulseAlpha"
     )
 
     val (color, text) = when (state) {
-        WsConnectionState.CONNECTED -> EmeraldSuccess to "Live WS"
-        WsConnectionState.CONNECTING -> AmberWarning to "Connecting"
+        WsConnectionState.CONNECTED -> EmeraldSuccess to "Live"
+        WsConnectionState.CONNECTING -> AmberWarning to "Connecting…"
         WsConnectionState.DISCONNECTED -> TextMuted to "Offline"
-        WsConnectionState.ERROR -> CrimsonError to "WS Error"
+        WsConnectionState.ERROR -> CrimsonError to "Reconnecting…"
     }
 
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = GlassSurfaceElevated,
-        border = BorderStroke(1.dp, color.copy(alpha = 0.4f)),
-        modifier = modifier.testTag("ws_connection_badge")
+    if (state == WsConnectionState.CONNECTED) {
+        Box(
+            modifier = modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(color)
+                .testTag("ws_connection_badge")
+        )
+        return
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .glass(RoundedCornerShape(16.dp), strength = 0.8f)
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+            .testTag("ws_connection_badge")
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (state == WsConnectionState.CONNECTING) color.copy(alpha = alpha) else color
-                    )
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(if (state == WsConnectionState.CONNECTING) color.copy(alpha = alpha) else color)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = color
             )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = color
-                )
-            )
-        }
+        )
     }
 }
 
@@ -97,39 +100,53 @@ fun DarkTalkTopBar(
     onBackClick: (() -> Unit)? = null,
     onTitleClick: (() -> Unit)? = null,
     wsState: WsConnectionState? = null,
+    titleLeading: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {}
 ) {
-    Surface(
-        shape = RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp),
-        color = GlassSurface,
-        border = BorderStroke(
-            width = 1.dp,
-            brush = Brush.verticalGradient(
-                listOf(CyanGlassBorder, Color(0x1AFFFFFF))
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .glass(
+                RoundedCornerShape(bottomStart = 26.dp, bottomEnd = 26.dp),
+                strength = 1.1f,
+                baseAlpha = 0.6f
             )
-        ),
-        modifier = Modifier.fillMaxWidth()
     ) {
         TopAppBar(
             title = {
-                Column(
-                    modifier = if (onTitleClick != null) Modifier.clickable { onTitleClick() } else Modifier
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = if (onTitleClick != null) {
+                        Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onTitleClick() }
+                    } else Modifier
                 ) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                    )
-                    if (!subtitle.isNullOrBlank()) {
+                    if (titleLeading != null) {
+                        titleLeading()
+                        Spacer(modifier = Modifier.width(10.dp))
+                    }
+                    Column {
                         Text(
-                            text = subtitle,
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = CyanAccent,
-                                fontSize = 12.sp
+                            text = title,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
                             )
                         )
+                        if (!subtitle.isNullOrBlank()) {
+                            Text(
+                                text = subtitle,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = if (subtitle.startsWith("typing")) CyanAccent else TextSecondary,
+                                    fontSize = 12.sp
+                                )
+                            )
+                        }
                     }
                 }
             },
@@ -153,9 +170,7 @@ fun DarkTalkTopBar(
                 }
                 actions()
             },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = Color.Transparent
-            )
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
         )
     }
 }
@@ -170,25 +185,21 @@ fun AvatarView(
 ) {
     val initial = displayName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
     val gradientColors = remember(displayName) {
-        val hash = abs(displayName.hashCode())
         val palettes = listOf(
-            listOf(Color(0xFF0284C7), Color(0xFF0369A1)),
-            listOf(Color(0xFF7C3AED), Color(0xFF4C1D95)),
-            listOf(Color(0xFF059669), Color(0xFF047857)),
-            listOf(Color(0xFFDB2777), Color(0xFF9D174D)),
-            listOf(Color(0xFFD97706), Color(0xFFB45309))
+            listOf(Color(0xFFFF8A8A), Color(0xFFE5486B)),
+            listOf(Color(0xFFFFB454), Color(0xFFE67E22)),
+            listOf(Color(0xFFB388FF), Color(0xFF7C4DFF)),
+            listOf(Color(0xFF5EE6A8), Color(0xFF1FAF7A)),
+            listOf(Color(0xFF4FD8FF), Color(0xFF1E9BD7)),
+            listOf(Color(0xFF6FB7FF), Color(0xFF3A74E0)),
+            listOf(Color(0xFFFF8FD0), Color(0xFFD6459A))
         )
-        palettes[hash % palettes.size]
+        palettes[abs(displayName.hashCode()) % palettes.size]
     }
 
-    val resolvedAvatar = remember(avatarUrl) {
-        MediaUrlUtils.resolveUrl(avatarUrl)
-    }
+    val resolvedAvatar = remember(avatarUrl) { MediaUrlUtils.resolveUrl(avatarUrl) }
 
-    Box(
-        modifier = modifier.size(size),
-        contentAlignment = Alignment.Center
-    ) {
+    Box(modifier = modifier.size(size), contentAlignment = Alignment.Center) {
         if (!resolvedAvatar.isNullOrBlank()) {
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
@@ -226,7 +237,7 @@ fun AvatarView(
                     .size(size * 0.28f)
                     .align(Alignment.BottomEnd)
                     .clip(CircleShape)
-                    .background(DarkBackground)
+                    .background(BackdropBase)
                     .padding(1.5.dp)
             ) {
                 Box(
@@ -270,12 +281,12 @@ fun CyberTextField(
             keyboardOptions = keyboardOptions,
             keyboardActions = keyboardActions,
             singleLine = singleLine,
-            shape = RoundedCornerShape(22.dp),
+            shape = RoundedCornerShape(20.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = GlassSurfaceElevated,
-                unfocusedContainerColor = GlassSurface,
+                focusedContainerColor = Color.White.copy(alpha = 0.10f),
+                unfocusedContainerColor = Color.White.copy(alpha = 0.06f),
                 focusedBorderColor = CyanAccent,
-                unfocusedBorderColor = BubbleBorder,
+                unfocusedBorderColor = Color.White.copy(alpha = 0.18f),
                 focusedLabelColor = CyanAccent,
                 unfocusedLabelColor = TextSecondary,
                 cursorColor = CyanAccent,
@@ -308,17 +319,18 @@ fun CyberButton(
     isSecondary: Boolean = false,
     testTag: String = "cyber_button"
 ) {
+    val onAccent = LocalAppThemeColors.current.buttonContent
     val buttonColors = if (isSecondary) {
         ButtonDefaults.buttonColors(
-            containerColor = GlassSurfaceElevated,
+            containerColor = Color.White.copy(alpha = 0.10f),
             contentColor = TextPrimary,
-            disabledContainerColor = GlassSurface,
+            disabledContainerColor = Color.White.copy(alpha = 0.05f),
             disabledContentColor = TextMuted
         )
     } else {
         ButtonDefaults.buttonColors(
             containerColor = CyanAccent,
-            contentColor = Color(0xFF001F28),
+            contentColor = onAccent,
             disabledContainerColor = CyanAccent.copy(alpha = 0.3f),
             disabledContentColor = Color.White.copy(alpha = 0.4f)
         )
@@ -328,7 +340,8 @@ fun CyberButton(
         onClick = onClick,
         enabled = enabled && !isLoading,
         colors = buttonColors,
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(20.dp),
+        border = if (isSecondary) BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)) else null,
         modifier = modifier
             .heightIn(min = 50.dp)
             .testTag(testTag)
@@ -336,7 +349,7 @@ fun CyberButton(
         if (isLoading) {
             CircularProgressIndicator(
                 strokeWidth = 2.dp,
-                color = if (isSecondary) CyanAccent else Color(0xFF001F28),
+                color = if (isSecondary) CyanAccent else onAccent,
                 modifier = Modifier.size(20.dp)
             )
         } else {

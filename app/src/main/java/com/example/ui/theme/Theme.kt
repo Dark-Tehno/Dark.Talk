@@ -8,16 +8,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
-val LocalAppThemeColors = staticCompositionLocalOf { CyberThemeColors }
+val LocalAppThemeColors = staticCompositionLocalOf { TelegramThemeColors }
 
 @Composable
 fun DarkTalkTheme(
-    themeName: String = "cyber",
+    themeName: String = "telegram",
     content: @Composable () -> Unit
 ) {
     val themeColors = remember(themeName) { getThemeColors(themeName) }
 
-    val darkColorScheme = darkColorScheme(
+    val scheme = darkColorScheme(
         primary = themeColors.primary,
         onPrimary = themeColors.buttonContent,
         primaryContainer = themeColors.primaryContainer,
@@ -27,9 +27,9 @@ fun DarkTalkTheme(
         secondaryContainer = VioletContainer,
         onSecondaryContainer = Color(0xFFEADBFF),
         tertiary = EmeraldSuccess,
-        background = DarkBackground,
+        background = BackdropBase,
         onBackground = TextPrimary,
-        surface = DarkSurface,
+        surface = DarkSurfaceElevated,
         onSurface = TextPrimary,
         surfaceVariant = DarkSurfaceVariant,
         onSurfaceVariant = TextSecondary,
@@ -39,18 +39,15 @@ fun DarkTalkTheme(
         onError = Color.White
     )
 
-    CompositionLocalProvider(
-        LocalAppThemeColors provides themeColors
-    ) {
+    CompositionLocalProvider(LocalAppThemeColors provides themeColors) {
         MaterialTheme(
-            colorScheme = darkColorScheme,
+            colorScheme = scheme,
             typography = Typography,
             content = content
         )
     }
 }
 
-// Backward compatibility alias
 @Composable
 fun MyApplicationTheme(
     darkTheme: Boolean = true,

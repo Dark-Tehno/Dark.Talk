@@ -32,6 +32,9 @@ interface MessageDao {
     @Query("DELETE FROM messages WHERE id = :messageId")
     suspend fun deleteMessageById(messageId: Long)
 
+    @Query("UPDATE messages SET isDeleted = 1, text = '', attachment = NULL, attachmentName = NULL, attachmentSize = NULL WHERE id = :messageId")
+    suspend fun markMessageDeleted(messageId: Long)
+
     @Query("DELETE FROM messages WHERE chatId = :chatId")
     suspend fun deleteMessagesForChat(chatId: Long)
 

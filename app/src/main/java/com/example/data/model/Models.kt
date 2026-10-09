@@ -137,6 +137,7 @@ data class Chat(
     @Json(name = "updated_at") val updatedAt: String? = null,
     @Json(name = "unread_count") val unreadCount: Int = 0,
     @Json(name = "participants") val participants: List<ChatParticipant> = emptyList(),
+    @Json(name = "last_message_id") val lastMessageId: Long? = null,
     @Json(name = "last_message") val lastMessage: Message? = null
 )
 

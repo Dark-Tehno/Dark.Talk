@@ -1,13 +1,12 @@
 package com.example.data.local.db
 
-import android.os.Build
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.example.data.model.Chat
 import com.example.data.model.ChatParticipant
 import com.example.data.model.Message
 import com.example.data.model.User
-import java.time.Instant
+import com.example.util.MediaUrlUtils
 
 @Entity(tableName = "chats")
 data class ChatEntity(
@@ -74,22 +73,11 @@ data class ChatEntity(
     }
 
     companion object {
-        private fun parseIsoToMillis(isoString: String?): Long {
-            if (isoString.isNullOrBlank()) return 0L
-            return runCatching {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    Instant.parse(isoString).toEpochMilli()
-                } else {
-                    0L
-                }
-            }.getOrElse { 0L }
-        }
-
         fun fromDomain(chat: Chat, currentUserId: Long): ChatEntity {
             val otherPart = chat.participants.firstOrNull { it.user?.id != currentUserId }?.user
             val lastMsg = chat.lastMessage
             val msgTime = lastMsg?.createdAt ?: chat.updatedAt ?: chat.createdAt
-            val sortTs = parseIsoToMillis(msgTime)
+            val sortTs = MediaUrlUtils.parseIsoMillis(msgTime) ?: 0L
 
             return ChatEntity(
                 id = chat.id,

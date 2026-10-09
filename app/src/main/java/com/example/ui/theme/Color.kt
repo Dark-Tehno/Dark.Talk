@@ -4,16 +4,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
-val DarkBackground = Color(0xFF0A0D14)
-val DarkSurface = Color(0xEB131722)
-val DarkSurfaceVariant = Color(0xD91B212F)
-val DarkSurfaceElevated = Color(0xCC242C3D)
+/** Реальный фон рисует GlassBackdrop (MainActivity), поэтому экраны/Scaffold остаются прозрачными. */
+val BackdropBase = Color(0xFF070B14)
+val DarkBackground = Color.Transparent
 
-// Liquid Glass Surface colors
-val GlassSurface = Color(0xCC141824)
-val GlassSurfaceElevated = Color(0xE61E2638)
-val GlassBorder = Color(0x2BFFFFFF)
-val GlassHighlight = Color(0x1AFFFFFF)
+val DarkSurface = Color(0xB3101828)
+val DarkSurfaceVariant = Color(0xB31A2338)
+val DarkSurfaceElevated = Color(0xCC1F2A44)
+
+// Liquid Glass
+val GlassSurface = Color(0x99101828)
+val GlassSurfaceElevated = Color(0xB31C2740)
+val GlassBorder = Color(0x33FFFFFF)
+val GlassHighlight = Color(0x26FFFFFF)
 
 data class AppThemeColors(
     val primary: Color,
@@ -21,6 +24,14 @@ data class AppThemeColors(
     val onPrimaryContainer: Color,
     val buttonContent: Color,
     val glassBorder: Color
+)
+
+val TelegramThemeColors = AppThemeColors(
+    primary = Color(0xFF4EA8FF),
+    primaryContainer = Color(0xFF16406F),
+    onPrimaryContainer = Color(0xFFD3E8FF),
+    buttonContent = Color(0xFFFFFFFF),
+    glassBorder = Color(0x664EA8FF)
 )
 
 val CyberThemeColors = AppThemeColors(
@@ -65,11 +76,12 @@ val AmberThemeColors = AppThemeColors(
 
 fun getThemeColors(themeName: String): AppThemeColors {
     return when (themeName.lowercase()) {
+        "cyber" -> CyberThemeColors
         "neon" -> NeonThemeColors
         "emerald" -> EmeraldThemeColors
         "crimson" -> CrimsonThemeColors
         "amber" -> AmberThemeColors
-        else -> CyberThemeColors
+        else -> TelegramThemeColors
     }
 }
 
@@ -97,14 +109,13 @@ val CrimsonError = Color(0xFFFF5252)
 val AmberWarning = Color(0xFFFFB300)
 
 val TextPrimary = Color(0xFFF8FAFC)
-val TextSecondary = Color(0xFF94A3B8)
-val TextMuted = Color(0xFF64748B)
+val TextSecondary = Color(0xFFA3B1C6)
+val TextMuted = Color(0xFF6E7C93)
 
-val BubbleSelf = Color(0xE60284C7)
-val BubbleOther = Color(0xD91E2638)
-val BubbleBorder = Color(0x33FFFFFF)
+val BubbleSelf = Color(0xE62A7FDB)
+val BubbleOther = Color(0x26FFFFFF)
+val BubbleBorder = Color(0x2EFFFFFF)
 
-// Glassmorphism Brushes
 val GlassGlossBrush = Brush.verticalGradient(
     listOf(Color(0x26FFFFFF), Color(0x05FFFFFF))
 )

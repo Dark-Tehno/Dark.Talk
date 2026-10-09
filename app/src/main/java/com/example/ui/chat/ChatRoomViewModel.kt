@@ -14,6 +14,7 @@ import com.example.data.repository.Resource
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
@@ -43,41 +44,61 @@ class ChatRoomViewModel(
 
     val currentUserId: Long get() = repository.preferencesManager.userId
 
+    private var networkLoaded = false
     private var typingJob: Job? = null
+    private var lastTypingSentAt = 0L
+    private var searchJob: Job? = null
     private val typingTimeoutJobs = mutableMapOf<Long, Job>()
 
+    /** Объединяет списки по id: серверная версия заменяет локальную, порядок – по id. */
+    private fun merge(old: List<Message>, new: List<Message>): List<Message> {
+        val map = LinkedHashMap<Long, Message>()
+        old.forEach { map[it.id] = it }
+        new.forEach { map[it.id] = it }
+        return map.values.sortedBy { it.id }
+    }
+
     init {
-        // Pre-populate chat details from Room DB cache immediately
         viewModelScope.launch {
-            val cachedChat = repository.database.chatDao().getChatByIdSync(chatId)
-            if (cachedChat != null) {
-                _uiState.update { it.copy(chat = cachedChat.toDomain()) }
+            repository.database.chatDao().getChatByIdSync(chatId)?.let { cached ->
+                _uiState.update { it.copy(chat = cached.toDomain()) }
             }
         }
 
-        // Collect cached messages from Room persistence
+        // Room-кэш нужен только для мгновенного первого показа. Раньше он продолжал
+        // перезаписывать список и после каждого сообщения «обрезал» историю до 10 штук.
         viewModelScope.launch {
             repository.getCachedMessages(chatId).collect { cached ->
-                if (cached.isNotEmpty()) {
-                    _uiState.update { it.copy(messages = cached) }
+                if (!networkLoaded && cached.isNotEmpty()) {
+                    _uiState.update { it.copy(messages = merge(it.messages, cached)) }
                 }
             }
         }
 
-        // Connect to WebSocket room /ws/chat/{chat_id}/
         repository.webSocketManager.enterChatRoom(chatId)
 
-        // Observe room WebSocket status
         viewModelScope.launch {
+            var previous = WsConnectionState.DISCONNECTED
             repository.roomConnectionState.collect { state ->
                 _uiState.update { it.copy(roomWsState = state) }
+                // Переподключились -> догружаем то, что пропустили
+                if (previous != WsConnectionState.CONNECTED && state == WsConnectionState.CONNECTED && networkLoaded) {
+                    refreshLatest()
+                }
+                previous = state
             }
         }
 
-        // Observe WebSocket events
         viewModelScope.launch {
-            repository.wsEvents.collect { event ->
-                handleWsEvent(event)
+            repository.wsEvents.collect { event -> handleWsEvent(event) }
+        }
+
+        // README: HTTP-реакции/правки/удаления не публикуют WS-события, поэтому
+        // изменения других пользователей подтягиваем периодически.
+        viewModelScope.launch {
+            while (isActive) {
+                delay(15_000)
+                if (networkLoaded) refreshLatest()
             }
         }
 
@@ -94,7 +115,6 @@ class ChatRoomViewModel(
                 _uiState.update { it.copy(chat = cachedDomain) }
                 resolveOtherUserProfile(cachedDomain)
             }
-
             when (val result = repository.getChatDetails(chatId)) {
                 is Resource.Success -> {
                     _uiState.update { it.copy(chat = result.data) }
@@ -106,38 +126,43 @@ class ChatRoomViewModel(
     }
 
     private fun resolveOtherUserProfile(chat: Chat) {
-        val otherPart = chat.participants.firstOrNull { it.user?.id != currentUserId }?.user
-        if (otherPart != null) {
-            viewModelScope.launch {
-                val fullUser = repository.getUserById(otherPart.id) ?: otherPart
-                _uiState.update { it.copy(otherUserProfile = fullUser) }
-            }
+        val other = chat.participants.firstOrNull { it.user?.id != currentUserId }?.user ?: return
+        viewModelScope.launch {
+            val fullUser = repository.getUserById(other.id) ?: other
+            // Данные из ответа сервера свежее кэша (онлайн / last_online)
+            _uiState.update { it.copy(otherUserProfile = other.takeIf { o -> o.lastOnline != null || o.isOnline != null } ?: fullUser) }
         }
     }
 
     fun loadMessages() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            _uiState.update { it.copy(isLoading = it.messages.isEmpty(), errorMessage = null) }
             when (val result = repository.getMessages(chatId, limit = 50)) {
                 is Resource.Success -> {
+                    networkLoaded = true
                     val msgs = result.data.messages
                     _uiState.update {
                         it.copy(
-                            messages = msgs,
+                            messages = merge(it.messages, msgs),
                             hasMore = result.data.hasMore,
                             nextBeforeId = result.data.nextBeforeId,
                             isLoading = false
                         )
                     }
-                    val lastIncomingMsg = msgs.lastOrNull { it.sender?.id != currentUserId }
-                    if (lastIncomingMsg != null) {
-                        markAsRead(lastIncomingMsg.id, lastIncomingMsg.sender?.id)
-                    }
+                    msgs.lastOrNull { it.sender?.id != currentUserId }?.let { markAsRead(it.id, it.sender?.id) }
                 }
-                is Resource.Error -> {
-                    _uiState.update { it.copy(isLoading = false, errorMessage = result.message) }
-                }
+                is Resource.Error -> _uiState.update { it.copy(isLoading = false, errorMessage = result.message) }
                 is Resource.Loading -> {}
+            }
+        }
+    }
+
+    /** Тихо подтягивает последнюю страницу и сливает её со списком (не трогая пагинацию). */
+    fun refreshLatest() {
+        viewModelScope.launch {
+            val result = repository.getMessages(chatId, limit = 50)
+            if (result is Resource.Success) {
+                _uiState.update { it.copy(messages = merge(it.messages, result.data.messages)) }
             }
         }
     }
@@ -149,19 +174,15 @@ class ChatRoomViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingMore = true) }
             when (val result = repository.getMessages(chatId, limit = 50, beforeId = beforeId)) {
-                is Resource.Success -> {
-                    _uiState.update { state ->
-                        state.copy(
-                            messages = result.data.messages + state.messages,
-                            hasMore = result.data.hasMore,
-                            nextBeforeId = result.data.nextBeforeId,
-                            isLoadingMore = false
-                        )
-                    }
+                is Resource.Success -> _uiState.update { state ->
+                    state.copy(
+                        messages = merge(state.messages, result.data.messages),
+                        hasMore = result.data.hasMore,
+                        nextBeforeId = result.data.nextBeforeId,
+                        isLoadingMore = false
+                    )
                 }
-                is Resource.Error -> {
-                    _uiState.update { it.copy(isLoadingMore = false) }
-                }
+                is Resource.Error -> _uiState.update { it.copy(isLoadingMore = false) }
                 is Resource.Loading -> {}
             }
         }
@@ -170,110 +191,92 @@ class ChatRoomViewModel(
     private fun handleWsEvent(event: WsEvent) {
         when (event) {
             is WsEvent.MessageCreated -> {
-                if (event.chatId == chatId) {
-                    val currentList = _uiState.value.messages.toMutableList()
-                    val existingIndex = currentList.indexOfFirst {
+                if (event.chatId != chatId) return
+                _uiState.update { state ->
+                    val list = state.messages.toMutableList()
+                    val idx = list.indexOfFirst {
                         it.id == event.message.id ||
-                                (it.clientMessageId != null && it.clientMessageId == event.clientMessageId)
+                                (event.clientMessageId != null && it.clientMessageId == event.clientMessageId)
                     }
-                    if (existingIndex != -1) {
-                        currentList[existingIndex] = event.message
-                    } else {
-                        currentList.add(event.message)
-                    }
-                    _uiState.update { it.copy(messages = currentList) }
-
-                    if (event.message.sender?.id != currentUserId) {
-                        markAsRead(event.message.id, event.message.sender?.id)
-                    }
+                    if (idx != -1) list[idx] = event.message else list.add(event.message)
+                    state.copy(messages = list.sortedBy { it.id })
+                }
+                if (event.message.sender?.id != currentUserId) {
+                    markAsRead(event.message.id, event.message.sender?.id)
                 }
             }
             is WsEvent.MessageUpdated -> {
                 if (event.chatId == chatId) {
                     _uiState.update { state ->
-                        state.copy(
-                            messages = state.messages.map { msg ->
-                                if (msg.id == event.message.id) event.message else msg
-                            }
-                        )
+                        state.copy(messages = state.messages.map { if (it.id == event.message.id) event.message else it })
                     }
                 }
             }
             is WsEvent.MessageDeleted -> {
-                if (event.chatId == chatId) {
-                    _uiState.update { state ->
-                        state.copy(
-                            messages = state.messages.map { msg ->
-                                if (msg.id == event.messageId) {
-                                    msg.copy(isDeleted = true, text = "")
-                                } else msg
-                            }
-                        )
-                    }
-                }
+                if (event.chatId == chatId) markDeletedLocally(event.messageId)
             }
             is WsEvent.MessageRead -> {
                 if (event.chatId == chatId) {
                     _uiState.update { state ->
-                        state.copy(
-                            messages = state.messages.map { msg ->
-                                if (msg.id <= event.messageId && !msg.readBy.contains(event.userId)) {
-                                    msg.copy(readBy = msg.readBy + event.userId)
-                                } else msg
-                            }
-                        )
+                        state.copy(messages = state.messages.map { msg ->
+                            if (msg.id <= event.messageId && !msg.readBy.contains(event.userId)) {
+                                msg.copy(readBy = msg.readBy + event.userId)
+                            } else msg
+                        })
                     }
                 }
             }
             is WsEvent.Typing -> {
                 if (event.chatId == chatId && event.userId != currentUserId) {
-                    val currentTyping = _uiState.value.typingUserIds.toMutableSet()
                     if (event.isTyping) {
-                        currentTyping.add(event.userId)
-                        _uiState.update { it.copy(typingUserIds = currentTyping) }
-                        // Expire typing state automatically after 3 seconds
+                        _uiState.update { it.copy(typingUserIds = it.typingUserIds + event.userId) }
                         typingTimeoutJobs[event.userId]?.cancel()
                         typingTimeoutJobs[event.userId] = viewModelScope.launch {
-                            delay(3000)
-                            _uiState.update { st ->
-                                st.copy(typingUserIds = st.typingUserIds - event.userId)
-                            }
+                            delay(3500)
+                            _uiState.update { st -> st.copy(typingUserIds = st.typingUserIds - event.userId) }
                         }
                     } else {
-                        currentTyping.remove(event.userId)
-                        _uiState.update { it.copy(typingUserIds = currentTyping) }
+                        typingTimeoutJobs[event.userId]?.cancel()
+                        _uiState.update { it.copy(typingUserIds = it.typingUserIds - event.userId) }
                     }
                 }
             }
-            is WsEvent.Error -> {
-                _uiState.update { it.copy(errorMessage = event.message ?: event.code) }
-            }
+            is WsEvent.Error -> _uiState.update { it.copy(errorMessage = event.message ?: event.code) }
             else -> {}
         }
     }
 
-    fun sendMessage(text: String) {
-        if (text.isBlank()) return
-        val replyTo = _uiState.value.replyingTo?.id
-        val editing = _uiState.value.editingMessage
+    private fun markDeletedLocally(messageId: Long) {
+        _uiState.update { state ->
+            state.copy(messages = state.messages.map {
+                if (it.id == messageId) it.copy(isDeleted = true, text = "", attachment = null, attachmentName = null, attachmentSize = null) else it
+            })
+        }
+    }
 
+    fun sendMessage(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+
+        val editing = _uiState.value.editingMessage
         if (editing != null) {
-            editMessage(editing.id, text.trim())
+            if (editing.text != trimmed) editMessage(editing.id, trimmed)
             _uiState.update { it.copy(editingMessage = null) }
             return
         }
 
+        val replyTo = _uiState.value.replyingTo?.id
         val clientMsgId = "local-${UUID.randomUUID().toString().take(8)}"
+        stopTyping()
 
         viewModelScope.launch {
             _uiState.update { it.copy(replyingTo = null) }
-            when (val result = repository.sendTextMessage(chatId, text.trim(), replyTo, clientMsgId)) {
+            when (val result = repository.sendTextMessage(chatId, trimmed, replyTo, clientMsgId)) {
                 is Resource.Success -> {
-                    // WebSocket event or loadMessages will handle update
+                    // Если WS комнаты недоступен (ушло по HTTP) – не ждём события, а перечитываем.
+                    if (repository.roomConnectionState.value != WsConnectionState.CONNECTED) refreshLatest()
                 }
-                is Resource.Error -> {
-                    _uiState.update { it.copy(errorMessage = result.message) }
-                }
+                is Resource.Error -> _uiState.update { it.copy(errorMessage = result.message) }
                 is Resource.Loading -> {}
             }
         }
@@ -290,12 +293,8 @@ class ChatRoomViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(replyingTo = null) }
             when (val result = repository.sendAttachment(chatId, bytes, fileName, mimeType, text, replyTo, overrideMessageType)) {
-                is Resource.Success -> {
-                    loadMessages()
-                }
-                is Resource.Error -> {
-                    _uiState.update { it.copy(errorMessage = result.message) }
-                }
+                is Resource.Success -> refreshLatest() // раньше loadMessages() затирал подгруженную историю
+                is Resource.Error -> _uiState.update { it.copy(errorMessage = result.message) }
                 is Resource.Loading -> {}
             }
         }
@@ -304,48 +303,50 @@ class ChatRoomViewModel(
     fun editMessage(messageId: Long, newText: String) {
         viewModelScope.launch {
             when (val result = repository.editMessage(chatId, messageId, newText)) {
-                is Resource.Success -> {
-                    _uiState.update { state ->
-                        state.copy(
-                            messages = state.messages.map {
-                                if (it.id == messageId) it.copy(text = newText, isEdited = true) else it
-                            }
-                        )
-                    }
+                is Resource.Success -> _uiState.update { state ->
+                    state.copy(messages = state.messages.map {
+                        if (it.id == messageId) it.copy(text = newText, isEdited = true) else it
+                    })
                 }
-                is Resource.Error -> {
-                    _uiState.update { it.copy(errorMessage = result.message) }
-                }
+                is Resource.Error -> _uiState.update { it.copy(errorMessage = result.message) }
                 is Resource.Loading -> {}
             }
         }
     }
 
-    fun deleteMessage(messageId: Long) {
+    /**
+     * Через WS удалять можно только своё сообщение; admin/owner удаляют чужие через HTTP (README).
+     */
+    fun deleteMessage(message: Message) {
+        val own = message.sender?.id == currentUserId
         viewModelScope.launch {
-            when (val result = repository.deleteMessage(chatId, messageId)) {
-                is Resource.Success -> {
-                    _uiState.update { state ->
-                        state.copy(
-                            messages = state.messages.map {
-                                if (it.id == messageId) it.copy(isDeleted = true, text = "") else it
-                            }
-                        )
-                    }
-                }
-                is Resource.Error -> {
-                    _uiState.update { it.copy(errorMessage = result.message) }
-                }
+            when (val result = repository.deleteMessage(chatId, message.id, forceHttp = !own)) {
+                is Resource.Success -> markDeletedLocally(message.id)
+                is Resource.Error -> _uiState.update { it.copy(errorMessage = result.message) }
                 is Resource.Loading -> {}
             }
         }
     }
 
+    /** Индикатор «печатает»: не чаще раза в 2 с, и «false» после паузы 2.5 с. */
     fun onTypingInput() {
+        val now = System.currentTimeMillis()
+        if (now - lastTypingSentAt > 2000) {
+            lastTypingSentAt = now
+            repository.sendTyping(true)
+        }
         typingJob?.cancel()
         typingJob = viewModelScope.launch {
-            repository.sendTyping(true)
-            delay(2000)
+            delay(2500)
+            lastTypingSentAt = 0L
+            repository.sendTyping(false)
+        }
+    }
+
+    fun stopTyping() {
+        typingJob?.cancel()
+        if (lastTypingSentAt != 0L) {
+            lastTypingSentAt = 0L
             repository.sendTyping(false)
         }
     }
@@ -359,39 +360,31 @@ class ChatRoomViewModel(
     }
 
     fun toggleReaction(message: Message, emoji: String) {
-        val existingReaction = message.reactions.firstOrNull { it.userId == currentUserId && it.emoji == emoji }
+        val mine = message.reactions.firstOrNull { it.userId == currentUserId && it.emoji == emoji }
         viewModelScope.launch {
-            if (existingReaction != null) {
-                repository.removeReaction(message.id, emoji)
-                _uiState.update { state ->
-                    state.copy(
-                        messages = state.messages.map { msg ->
+            if (mine != null) {
+                when (val r = repository.removeReaction(message.id, emoji)) {
+                    is Resource.Success -> _uiState.update { state ->
+                        state.copy(messages = state.messages.map { msg ->
                             if (msg.id == message.id) {
                                 msg.copy(reactions = msg.reactions.filterNot { it.userId == currentUserId && it.emoji == emoji })
                             } else msg
-                        }
-                    )
+                        })
+                    }
+                    is Resource.Error -> _uiState.update { it.copy(errorMessage = r.message) }
+                    is Resource.Loading -> {}
                 }
             } else {
                 when (val result = repository.addReaction(message.id, emoji)) {
                     is Resource.Success -> {
-                        val reaction = result.data ?: MessageReaction(
-                            userId = currentUserId,
-                            emoji = emoji
-                        )
+                        val reaction = result.data ?: MessageReaction(userId = currentUserId, emoji = emoji)
                         _uiState.update { state ->
-                            state.copy(
-                                messages = state.messages.map { msg ->
-                                    if (msg.id == message.id) {
-                                        msg.copy(reactions = msg.reactions + reaction)
-                                    } else msg
-                                }
-                            )
+                            state.copy(messages = state.messages.map { msg ->
+                                if (msg.id == message.id) msg.copy(reactions = msg.reactions + reaction) else msg
+                            })
                         }
                     }
-                    is Resource.Error -> {
-                        _uiState.update { it.copy(errorMessage = result.message) }
-                    }
+                    is Resource.Error -> _uiState.update { it.copy(errorMessage = result.message) }
                     is Resource.Loading -> {}
                 }
             }
@@ -402,24 +395,16 @@ class ChatRoomViewModel(
         if (senderId != null && senderId == currentUserId) return
         viewModelScope.launch {
             repository.markChatAsRead(chatId, messageId)
-            if (messageId != null) {
-                repository.markMessageRead(chatId, messageId)
-            }
+            if (messageId != null) repository.markMessageRead(chatId, messageId)
         }
     }
 
     fun addParticipants(usernames: List<String>) {
         if (usernames.isEmpty()) return
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
             when (val res = repository.addParticipants(chatId, usernames)) {
-                is Resource.Success -> {
-                    loadChatDetails()
-                    _uiState.update { it.copy(isLoading = false, errorMessage = null) }
-                }
-                is Resource.Error -> {
-                    _uiState.update { it.copy(isLoading = false, errorMessage = res.message) }
-                }
+                is Resource.Success -> loadChatDetails()
+                is Resource.Error -> _uiState.update { it.copy(errorMessage = res.message) }
                 is Resource.Loading -> {}
             }
         }
@@ -427,22 +412,36 @@ class ChatRoomViewModel(
 
     fun removeParticipant(userId: Long) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
             when (val res = repository.leaveOrRemoveParticipant(chatId, userId)) {
+                is Resource.Success -> loadChatDetails()
+                is Resource.Error -> _uiState.update { it.copy(errorMessage = res.message) }
+                is Resource.Loading -> {}
+            }
+        }
+    }
+
+    fun leaveChat(onDone: () -> Unit) {
+        viewModelScope.launch {
+            when (val res = repository.leaveOrRemoveParticipant(chatId, currentUserId)) {
                 is Resource.Success -> {
-                    loadChatDetails()
-                    _uiState.update { it.copy(isLoading = false, errorMessage = null) }
+                    repository.database.chatDao().deleteChatById(chatId)
+                    repository.database.messageDao().deleteMessagesForChat(chatId)
+                    onDone()
                 }
-                is Resource.Error -> {
-                    _uiState.update { it.copy(isLoading = false, errorMessage = res.message) }
-                }
+                is Resource.Error -> _uiState.update { it.copy(errorMessage = res.message) }
                 is Resource.Loading -> {}
             }
         }
     }
 
     fun searchUsers(query: String, onResult: (List<User>) -> Unit) {
-        viewModelScope.launch {
+        searchJob?.cancel()
+        if (query.isBlank()) {
+            onResult(emptyList())
+            return
+        }
+        searchJob = viewModelScope.launch {
+            delay(300)
             when (val res = repository.searchUsers(query)) {
                 is Resource.Success -> onResult(res.data)
                 else -> onResult(emptyList())
@@ -451,15 +450,12 @@ class ChatRoomViewModel(
     }
 
     fun downloadVoiceFile(rawUrl: String, messageId: Long, onComplete: (File?) -> Unit) {
-        val voiceDir = DarkTalkApplication.instance.cacheDir.resolve("media_cache")
+        // Отдельная папка: media_cache принадлежит Coil DiskCache и должна использоваться только им.
+        val voiceDir = DarkTalkApplication.instance.cacheDir.resolve("voice_cache")
         val targetFile = voiceDir.resolve("voice_${messageId}.m4a")
         viewModelScope.launch {
             val success = repository.downloadAuthenticatedFile(rawUrl, targetFile)
-            if (success) {
-                onComplete(targetFile)
-            } else {
-                onComplete(null)
-            }
+            onComplete(if (success) targetFile else null)
         }
     }
 
@@ -476,6 +472,7 @@ class ChatRoomViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        stopTyping()
         repository.webSocketManager.leaveChatRoom()
     }
 }

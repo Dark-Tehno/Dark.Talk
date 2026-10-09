@@ -9,12 +9,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.data.repository.DarkTalkRepository
@@ -24,11 +26,13 @@ import com.example.ui.chat.ChatRoomScreen
 import com.example.ui.chat.ChatRoomViewModel
 import com.example.ui.chats.ChatsScreen
 import com.example.ui.chats.ChatsViewModel
+import com.example.ui.components.GlassBackdrop
 import com.example.ui.settings.SettingsScreen
 import com.example.ui.settings.SettingsViewModel
-import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkTalkTheme
-import kotlinx.coroutines.delay
+import com.example.ui.theme.TextPrimary
+import com.example.util.LocalAppStrings
+import com.example.util.getTranslations
 
 class MainActivity : ComponentActivity() {
 
@@ -39,26 +43,24 @@ class MainActivity : ComponentActivity() {
         val repository = (application as DarkTalkApplication).repository
 
         setContent {
-            var currentTheme by remember {
-                mutableStateOf(repository.preferencesManager.appTheme)
-            }
+            // Реактивная тема и реактивный язык приложения
+            val themeName by repository.preferencesManager.appThemeFlow.collectAsState()
+            val userLanguage by repository.preferencesManager.userLanguageFlow.collectAsState()
+            val translations = remember(userLanguage) { getTranslations(userLanguage) }
 
-            LaunchedEffect(Unit) {
-                while (true) {
-                    val saved = repository.preferencesManager.appTheme
-                    if (saved != currentTheme) {
-                        currentTheme = saved
+            CompositionLocalProvider(
+                LocalAppStrings provides translations
+            ) {
+                DarkTalkTheme(themeName = themeName) {
+                    GlassBackdrop {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = Color.Transparent,
+                            contentColor = TextPrimary
+                        ) {
+                            DarkTalkNavGraph(repository = repository)
+                        }
                     }
-                    delay(300)
-                }
-            }
-
-            DarkTalkTheme(themeName = currentTheme) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = DarkBackground
-                ) {
-                    DarkTalkNavGraph(repository = repository)
                 }
             }
         }
@@ -79,10 +81,17 @@ fun DarkTalkNavGraph(repository: DarkTalkRepository) {
     val navController = rememberNavController()
     val startDestination = if (repository.preferencesManager.isLoggedIn) "chats" else "auth"
 
-    NavHost(
-        navController = navController,
-        startDestination = startDestination
-    ) {
+    // Токен отозван (401) / устройство удалено -> возвращаем на экран входа
+    val loggedIn by repository.preferencesManager.isLoggedInFlow.collectAsState()
+    val route = navController.currentBackStackEntryAsState().value?.destination?.route
+    LaunchedEffect(loggedIn, route) {
+        if (!loggedIn && route != null && route != "auth" && route != "settings") {
+            repository.logout()
+            navController.navigate("auth") { popUpTo(0) { inclusive = true } }
+        }
+    }
+
+    NavHost(navController = navController, startDestination = startDestination) {
         composable("auth") {
             val authViewModel: AuthViewModel = viewModel(
                 factory = CustomViewModelFactory { AuthViewModel(repository) }
@@ -92,9 +101,7 @@ fun DarkTalkNavGraph(repository: DarkTalkRepository) {
                 serverDomain = repository.preferencesManager.serverDomain,
                 onNavigateToSettings = { navController.navigate("settings") },
                 onAuthSuccess = {
-                    navController.navigate("chats") {
-                        popUpTo("auth") { inclusive = true }
-                    }
+                    navController.navigate("chats") { popUpTo("auth") { inclusive = true } }
                 }
             )
         }
@@ -107,8 +114,7 @@ fun DarkTalkNavGraph(repository: DarkTalkRepository) {
                 viewModel = chatsViewModel,
                 currentUserId = repository.preferencesManager.userId,
                 onChatClick = { chatId, title ->
-                    val encodedTitle = Uri.encode(title)
-                    navController.navigate("chat_room/$chatId/$encodedTitle")
+                    navController.navigate("chat_room/$chatId/${Uri.encode(title)}")
                 },
                 onNavigateToProfile = { navController.navigate("profile") },
                 onNavigateToSettings = { navController.navigate("settings") }
@@ -123,8 +129,7 @@ fun DarkTalkNavGraph(repository: DarkTalkRepository) {
             )
         ) { backStackEntry ->
             val chatId = backStackEntry.arguments?.getLong("chatId") ?: 0L
-            val rawTitle = backStackEntry.arguments?.getString("chatTitle") ?: "Chat"
-            val chatTitle = Uri.decode(rawTitle)
+            val chatTitle = Uri.decode(backStackEntry.arguments?.getString("chatTitle") ?: "Chat")
 
             val chatRoomViewModel: ChatRoomViewModel = viewModel(
                 key = "chat_room_$chatId",
@@ -146,11 +151,7 @@ fun DarkTalkNavGraph(repository: DarkTalkRepository) {
                 viewModel = settingsViewModel,
                 initialTab = 0,
                 onBackClick = { navController.popBackStack() },
-                onLoggedOut = {
-                    navController.navigate("auth") {
-                        popUpTo(0) { inclusive = true }
-                    }
-                }
+                onLoggedOut = { navController.navigate("auth") { popUpTo(0) { inclusive = true } } }
             )
         }
 
@@ -162,11 +163,7 @@ fun DarkTalkNavGraph(repository: DarkTalkRepository) {
                 viewModel = settingsViewModel,
                 initialTab = 0,
                 onBackClick = { navController.popBackStack() },
-                onLoggedOut = {
-                    navController.navigate("auth") {
-                        popUpTo(0) { inclusive = true }
-                    }
-                }
+                onLoggedOut = { navController.navigate("auth") { popUpTo(0) { inclusive = true } } }
             )
         }
     }

@@ -25,6 +25,7 @@ import com.example.ui.components.AvatarView
 import com.example.ui.components.CyberButton
 import com.example.ui.components.DarkTalkTopBar
 import com.example.ui.theme.*
+import com.example.util.LocalAppStrings
 
 @Composable
 fun ProfileScreen(
@@ -33,6 +34,7 @@ fun ProfileScreen(
     onLoggedOut: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val strings = LocalAppStrings.current
 
     LaunchedEffect(uiState.isLoggedOut) {
         if (uiState.isLoggedOut) {
@@ -130,7 +132,7 @@ fun ProfileScreen(
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
                         InfoPill(label = "User ID", value = "#${user?.id ?: "-"}")
-                        InfoPill(label = "Language", value = user?.language ?: "Russian")
+                        InfoPill(label = strings.languageLabel, value = user?.language ?: "Russian")
                         InfoPill(label = "Status", value = if (user?.isOnline == true) "Online" else "Active")
                     }
                 }
@@ -346,7 +348,7 @@ fun ProfileScreen(
 
             // Logout Button
             CyberButton(
-                text = "Sign Out",
+                text = strings.signOutButton,
                 onClick = { viewModel.logout() },
                 isLoading = uiState.isLoading,
                 isSecondary = true,

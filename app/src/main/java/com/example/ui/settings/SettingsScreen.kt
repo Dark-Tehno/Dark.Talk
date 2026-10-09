@@ -40,7 +40,9 @@ import com.example.ui.components.CyberButton
 import com.example.ui.components.CyberTextField
 import com.example.ui.components.DarkTalkTopBar
 import com.example.ui.theme.*
+import com.example.util.LocalAppStrings
 import com.example.util.MediaUrlUtils
+import com.example.util.isEnglishLanguage
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -61,6 +63,7 @@ fun SettingsScreen(
     onLoggedOut: (() -> Unit)? = null
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val strings = LocalAppStrings.current
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
@@ -98,13 +101,13 @@ fun SettingsScreen(
         containerColor = DarkBackground,
         topBar = {
             DarkTalkTopBar(
-                title = "Settings",
+                title = strings.settingsTitle,
                 subtitle = when (uiState.selectedTab) {
-                    0 -> "Account & Profile"
-                    1 -> "Security & Sessions"
-                    2 -> "Network & App Config"
-                    3 -> "Data & Storage"
-                    else -> "Appearance & Emojis"
+                    0 -> strings.profileTab
+                    1 -> strings.securityTab
+                    2 -> strings.networkTab
+                    3 -> strings.storageTab
+                    else -> strings.personalizationTab
                 },
                 onBackClick = onBackClick
             )
@@ -138,7 +141,7 @@ fun SettingsScreen(
                     onClick = { viewModel.selectTab(0) },
                     text = {
                         Text(
-                            text = "Profile",
+                            text = strings.profileTab,
                             fontWeight = if (uiState.selectedTab == 0) FontWeight.Bold else FontWeight.Normal
                         )
                     },
@@ -153,7 +156,7 @@ fun SettingsScreen(
                     onClick = { viewModel.selectTab(1) },
                     text = {
                         Text(
-                            text = "Security",
+                            text = strings.securityTab,
                             fontWeight = if (uiState.selectedTab == 1) FontWeight.Bold else FontWeight.Normal
                         )
                     },
@@ -168,7 +171,7 @@ fun SettingsScreen(
                     onClick = { viewModel.selectTab(2) },
                     text = {
                         Text(
-                            text = "Network",
+                            text = strings.networkTab,
                             fontWeight = if (uiState.selectedTab == 2) FontWeight.Bold else FontWeight.Normal
                         )
                     },
@@ -183,7 +186,7 @@ fun SettingsScreen(
                     onClick = { viewModel.selectTab(3) },
                     text = {
                         Text(
-                            text = "Storage",
+                            text = strings.storageTab,
                             fontWeight = if (uiState.selectedTab == 3) FontWeight.Bold else FontWeight.Normal
                         )
                     },
@@ -198,7 +201,7 @@ fun SettingsScreen(
                     onClick = { viewModel.selectTab(4) },
                     text = {
                         Text(
-                            text = "Personalization",
+                            text = strings.personalizationTab,
                             fontWeight = if (uiState.selectedTab == 4) FontWeight.Bold else FontWeight.Normal
                         )
                     },
@@ -256,6 +259,7 @@ fun ProfileTabContent(
     viewModel: SettingsViewModel,
     onPickAvatar: () -> Unit
 ) {
+    val strings = LocalAppStrings.current
     Column {
         // Notice banner
         AnimatedVisibility(visible = !uiState.profileMessage.isNullOrBlank()) {
@@ -381,7 +385,7 @@ fun ProfileTabContent(
         CyberTextField(
             value = uiState.editInfo,
             onValueChange = { viewModel.onInfoChanged(it) },
-            label = "Bio / About",
+            label = strings.bioLabel,
             placeholder = "Say something about yourself",
             leadingIcon = { Icon(Icons.Default.Info, contentDescription = null, tint = CyanAccent) },
             singleLine = false,
@@ -394,7 +398,7 @@ fun ProfileTabContent(
         CyberTextField(
             value = uiState.editDateOfBirth,
             onValueChange = { viewModel.onDateOfBirthChanged(it) },
-            label = "Date of Birth (YYYY-MM-DD)",
+            label = "${strings.dobLabel} (YYYY-MM-DD)",
             placeholder = "2000-01-31",
             leadingIcon = { Icon(Icons.Default.Cake, contentDescription = null, tint = CyanAccent) },
             testTag = "edit_dob_input"
@@ -404,7 +408,7 @@ fun ProfileTabContent(
 
         // Language Selector
         Text(
-            text = "Preferred Language",
+            text = strings.languageLabel,
             style = MaterialTheme.typography.labelLarge.copy(color = TextSecondary)
         )
         Spacer(modifier = Modifier.height(6.dp))
@@ -413,7 +417,7 @@ fun ProfileTabContent(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             listOf("Russian", "English").forEach { lang ->
-                val isSelected = uiState.editLanguage.equals(lang, ignoreCase = true)
+                val isSelected = isEnglishLanguage(uiState.editLanguage) == lang.equals("English", ignoreCase = true)
                 FilterChip(
                     selected = isSelected,
                     onClick = { viewModel.onLanguageChanged(lang) },
@@ -461,7 +465,7 @@ fun ProfileTabContent(
         Spacer(modifier = Modifier.height(24.dp))
 
         CyberButton(
-            text = "Save Profile",
+            text = strings.saveProfileButton,
             onClick = { viewModel.saveProfile() },
             isLoading = uiState.isProfileSaving,
             modifier = Modifier
@@ -479,6 +483,7 @@ fun SecurityTabContent(
     uiState: SettingsUiState,
     viewModel: SettingsViewModel
 ) {
+    val strings = LocalAppStrings.current
     Column {
         Text(
             text = "Two-Factor Authentication",
@@ -684,7 +689,7 @@ fun SecurityTabContent(
         }
 
         CyberButton(
-            text = "Sign Out",
+            text = strings.signOutButton,
             onClick = { viewModel.logout() },
             isLoading = uiState.isLoading,
             isSecondary = true,
@@ -984,6 +989,7 @@ fun StorageTabContent(
     uiState: SettingsUiState,
     viewModel: SettingsViewModel
 ) {
+    val strings = LocalAppStrings.current
     val context = LocalContext.current
     var customGbInput by remember(uiState.customCacheGbInput) { mutableStateOf(uiState.customCacheGbInput) }
 
@@ -1083,7 +1089,7 @@ fun StorageTabContent(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 CyberButton(
-                    text = "Clear All Media Cache",
+                    text = strings.clearCacheButton,
                     onClick = { viewModel.clearMediaCache(context) },
                     isSecondary = true,
                     icon = { Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = CrimsonError) },
@@ -1188,7 +1194,7 @@ fun StorageTabContent(
             )
 
             CyberButton(
-                text = "Применить",
+                text = strings.applyLimitButton,
                 onClick = { viewModel.updateCustomCacheGb(context, customGbInput) },
                 modifier = Modifier.align(Alignment.CenterVertically),
                 testTag = "apply_custom_cache_button"

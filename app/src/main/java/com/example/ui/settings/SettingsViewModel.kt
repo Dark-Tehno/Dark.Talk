@@ -403,7 +403,7 @@ class SettingsViewModel(private val repository: DarkTalkRepository) : ViewModel(
                             user = updatedUser,
                             editUsername = updatedUser.username,
                             editInfo = updatedUser.info.orEmpty(),
-                            editLanguage = updatedUser.language ?: "Russian",
+                            editLanguage = updatedUser.language ?: state.editLanguage,
                             editDateOfBirth = updatedUser.dateOfBirth.orEmpty(),
                             avatarBytes = null,
                             avatarFileName = null,

@@ -53,6 +53,9 @@ class DarkTalkApplication : Application(), ImageLoaderFactory {
         val imageLoader = newImageLoader()
         Coil.setImageLoader(imageLoader)
 
+        // Apply saved account language
+        preferencesManager.applyAppLocale(preferencesManager.userLanguage)
+
         // If user is already logged in, connect to global chats stream
         if (preferencesManager.isLoggedIn) {
             webSocketManager.connectChatsStream()

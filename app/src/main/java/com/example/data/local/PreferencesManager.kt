@@ -3,8 +3,12 @@ package com.example.data.local
 import android.content.Context
 import android.content.SharedPreferences
 import com.example.BuildConfig
+import com.example.util.isEnglishLanguage
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import java.util.Locale
 import java.util.UUID
 
 class PreferencesManager(context: Context) {
@@ -26,7 +30,19 @@ class PreferencesManager(context: Context) {
         private const val KEY_CUSTOM_CACHE_GB = "custom_cache_gb"
         private const val KEY_APP_THEME = "app_theme"
         private const val KEY_REACTION_EMOJIS = "reaction_emojis"
+        private const val KEY_USER_LANGUAGE = "user_language"
+        const val DEFAULT_THEME = "telegram"
     }
+
+    private val _appThemeFlow = MutableStateFlow(prefs.getString(KEY_APP_THEME, DEFAULT_THEME) ?: DEFAULT_THEME)
+    /** Реактивная тема – вместо опроса SharedPreferences каждые 300 мс. */
+    val appThemeFlow: StateFlow<String> = _appThemeFlow
+
+    private val _userLanguageFlow = MutableStateFlow(prefs.getString(KEY_USER_LANGUAGE, "Russian") ?: "Russian")
+    val userLanguageFlow: StateFlow<String> = _userLanguageFlow
+
+    private val _isLoggedInFlow = MutableStateFlow(!prefs.getString(KEY_AUTH_TOKEN, null).isNullOrBlank())
+    val isLoggedInFlow: StateFlow<Boolean> = _isLoggedInFlow
 
     var serverDomain: String
         get() {
@@ -40,16 +56,22 @@ class PreferencesManager(context: Context) {
         set(value) {
             val trimmed = value.trim()
             prefs.edit().putString(KEY_SERVER_DOMAIN, trimmed).apply()
-            // Auto-detect SSL preference if user explicitly entered a scheme
-            if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("ws://", ignoreCase = true)) {
+            val lower = trimmed.lowercase()
+            if (lower.startsWith("http://") || lower.startsWith("ws://") || lower.contains(":8000") || lower.contains(":8080") || lower.contains(":5000") || lower.contains("10.0.2.2") || lower.contains("localhost")) {
                 useSsl = false
-            } else if (trimmed.startsWith("https://", ignoreCase = true) || trimmed.startsWith("wss://", ignoreCase = true)) {
+            } else if (lower.startsWith("https://") || lower.startsWith("wss://")) {
                 useSsl = true
             }
         }
 
     var useSsl: Boolean
-        get() = prefs.getBoolean(KEY_USE_SSL, true)
+        get() {
+            val raw = serverDomain.trim().lowercase()
+            if (raw.contains(":8000") || raw.contains(":8080") || raw.contains(":5000") || raw.contains(":3000") || raw.contains("10.0.2.2") || raw.contains("localhost") || raw.contains("127.0.0.1")) {
+                return false
+            }
+            return prefs.getBoolean(KEY_USE_SSL, true)
+        }
         set(value) = prefs.edit().putBoolean(KEY_USE_SSL, value).apply()
 
     var appSecretKey: String
@@ -76,16 +98,19 @@ class PreferencesManager(context: Context) {
         get() = "${appSecretKey}--${clientName}|${clientVersion}"
 
     val wsSecretKeyHeader: String
-        get() = "${appSecretKey}--${clientVersion}"
+        get() = secretKeyHeader
 
     val httpBaseUrl: String
         get() {
             val raw = serverDomain.trim()
             val lower = raw.lowercase()
 
+            val isLocal = lower.contains(":8000") || lower.contains(":8080") || lower.contains(":5000") || lower.contains(":3000") || lower.contains("10.0.2.2") || lower.contains("localhost") || lower.contains("127.0.0.1")
+
             val scheme = when {
                 lower.startsWith("http://") || lower.startsWith("ws://") -> "http"
                 lower.startsWith("https://") || lower.startsWith("wss://") -> "https"
+                isLocal -> "http"
                 useSsl -> "https"
                 else -> "http"
             }
@@ -99,14 +124,8 @@ class PreferencesManager(context: Context) {
                 .trim()
 
             val hostPort = if (cleanDomain.isNotBlank()) cleanDomain else "vsp210.ru"
-            val candidate = "$scheme://$hostPort/"
-
-            val parsed = candidate.toHttpUrlOrNull()
-            return if (parsed != null) {
-                parsed.toString()
-            } else {
-                "https://vsp210.ru/"
-            }
+            val parsed = "$scheme://$hostPort/".toHttpUrlOrNull()
+            return parsed?.toString() ?: "https://vsp210.ru/"
         }
 
     val wsBaseUrl: String
@@ -114,17 +133,17 @@ class PreferencesManager(context: Context) {
             val httpUrl = httpBaseUrl.toHttpUrlOrNull() ?: "https://vsp210.ru/".toHttpUrl()
             val wsScheme = if (httpUrl.scheme == "https") "wss" else "ws"
             val portSuffix = if ((httpUrl.scheme == "http" && httpUrl.port == 80) ||
-                                 (httpUrl.scheme == "https" && httpUrl.port == 443)) {
-                ""
-            } else {
-                ":${httpUrl.port}"
-            }
+                (httpUrl.scheme == "https" && httpUrl.port == 443)
+            ) "" else ":${httpUrl.port}"
             return "$wsScheme://${httpUrl.host}$portSuffix"
         }
 
     var authToken: String?
         get() = prefs.getString(KEY_AUTH_TOKEN, null)
-        set(value) = prefs.edit().putString(KEY_AUTH_TOKEN, value).apply()
+        set(value) {
+            prefs.edit().putString(KEY_AUTH_TOKEN, value).apply()
+            _isLoggedInFlow.value = !value.isNullOrBlank()
+        }
 
     val isLoggedIn: Boolean
         get() = !authToken.isNullOrBlank()
@@ -156,6 +175,22 @@ class PreferencesManager(context: Context) {
         get() = prefs.getString(KEY_USER_AVATAR, null)
         set(value) = prefs.edit().putString(KEY_USER_AVATAR, value).apply()
 
+    var userLanguage: String
+        get() = prefs.getString(KEY_USER_LANGUAGE, "Russian") ?: "Russian"
+        set(value) {
+            val trimmed = value.trim()
+            prefs.edit().putString(KEY_USER_LANGUAGE, trimmed).apply()
+            _userLanguageFlow.value = trimmed
+            applyAppLocale(trimmed)
+        }
+
+    fun applyAppLocale(languageName: String?) {
+        if (languageName.isNullOrBlank()) return
+        val tag = if (isEnglishLanguage(languageName)) "en" else "ru"
+        val locale = Locale.forLanguageTag(tag)
+        Locale.setDefault(locale)
+    }
+
     var twoFactorEnabled: Boolean
         get() = prefs.getBoolean(KEY_2FA_ENABLED, false)
         set(value) = prefs.edit().putBoolean(KEY_2FA_ENABLED, value).apply()
@@ -169,8 +204,12 @@ class PreferencesManager(context: Context) {
         set(value) = prefs.edit().putString(KEY_CUSTOM_CACHE_GB, value.trim()).apply()
 
     var appTheme: String
-        get() = prefs.getString(KEY_APP_THEME, "cyber") ?: "cyber"
-        set(value) = prefs.edit().putString(KEY_APP_THEME, value.trim()).apply()
+        get() = prefs.getString(KEY_APP_THEME, DEFAULT_THEME) ?: DEFAULT_THEME
+        set(value) {
+            val v = value.trim()
+            prefs.edit().putString(KEY_APP_THEME, v).apply()
+            _appThemeFlow.value = v
+        }
 
     var customReactionEmojis: String
         get() = prefs.getString(KEY_REACTION_EMOJIS, "❤️,🔥,👍,😂,😮,👏") ?: "❤️,🔥,👍,😂,😮,👏"
@@ -179,11 +218,7 @@ class PreferencesManager(context: Context) {
     val maxCacheSizeBytes: Long
         get() {
             val mb = maxCacheMb
-            return if (mb <= 0L || mb >= 50000L) {
-                Long.MAX_VALUE
-            } else {
-                mb * 1024L * 1024L
-            }
+            return if (mb <= 0L || mb >= 50000L) Long.MAX_VALUE else mb * 1024L * 1024L
         }
 
     fun clearAuth() {
@@ -195,5 +230,6 @@ class PreferencesManager(context: Context) {
             .remove(KEY_USER_AVATAR)
             .remove(KEY_2FA_ENABLED)
             .apply()
+        _isLoggedInFlow.value = false
     }
 }

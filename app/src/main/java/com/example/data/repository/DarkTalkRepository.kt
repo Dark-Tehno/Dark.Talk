@@ -11,13 +11,19 @@ import com.example.data.network.DarkTalkWebSocketManager
 import com.example.data.network.NetworkClient
 import com.example.data.network.WsConnectionState
 import com.example.util.MediaUrlUtils
+import com.example.util.parseServerError
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
@@ -56,7 +62,7 @@ class DarkTalkRepository(
                         database.messageDao().insertMessage(MessageEntity.fromDomain(event.message))
                     }
                     is WsEvent.MessageDeleted -> {
-                        database.messageDao().deleteMessageById(event.messageId)
+                        database.messageDao().markMessageDeleted(event.messageId)
                     }
                     else -> {}
                 }
@@ -103,7 +109,7 @@ class DarkTalkRepository(
                 auth.token?.let { handleLoginSuccess(it, auth.user) }
                 Resource.Success(auth)
             } else {
-                val errorMsg = response.errorBody()?.string() ?: "Registration failed: ${response.code()}"
+                val errorMsg = parseServerError(response.errorBody()?.string()) ?: "Registration failed: ${response.code()}"
                 Resource.Error(errorMsg)
             }
         } catch (e: Exception) {
@@ -129,7 +135,7 @@ class DarkTalkRepository(
                     Resource.Success(auth)
                 }
             } else {
-                val errorMsg = response.errorBody()?.string() ?: "Login failed: ${response.code()}"
+                val errorMsg = parseServerError(response.errorBody()?.string()) ?: "Login failed: ${response.code()}"
                 Resource.Error(errorMsg)
             }
         } catch (e: Exception) {
@@ -151,7 +157,7 @@ class DarkTalkRepository(
                 auth.token?.let { handleLoginSuccess(it, auth.user) }
                 Resource.Success(auth)
             } else {
-                val errorMsg = response.errorBody()?.string() ?: "2FA Verification failed: ${response.code()}"
+                val errorMsg = parseServerError(response.errorBody()?.string()) ?: "2FA Verification failed: ${response.code()}"
                 Resource.Error(errorMsg)
             }
         } catch (e: Exception) {
@@ -165,7 +171,7 @@ class DarkTalkRepository(
             if (response.isSuccessful && response.body() != null) {
                 Resource.Success(response.body()!!)
             } else {
-                Resource.Error("Failed to resend 2FA: ${response.code()}")
+                Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to resend 2FA: ${response.code()}")
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Network error during 2FA resend")
@@ -180,6 +186,7 @@ class DarkTalkRepository(
             preferencesManager.userEmail = user.email
             preferencesManager.userAvatar = user.avatar
             preferencesManager.twoFactorEnabled = user.twoFactorEnabled ?: false
+            user.language?.let { preferencesManager.userLanguage = it }
             // Persist user to Room Database
             database.userDao().insertUser(UserEntity.fromDomain(user))
         }
@@ -213,7 +220,7 @@ class DarkTalkRepository(
             if (response.isSuccessful && response.body() != null) {
                 Resource.Success(response.body()!!)
             } else {
-                Resource.Error("Ping failed: ${response.code()}")
+                Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Ping failed: ${response.code()}")
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Ping failed")
@@ -228,6 +235,7 @@ class DarkTalkRepository(
                 preferencesManager.username = user.username
                 preferencesManager.userEmail = user.email
                 preferencesManager.twoFactorEnabled = user.twoFactorEnabled ?: false
+                user.language?.let { preferencesManager.userLanguage = it }
                 // Save to Room
                 database.userDao().insertUser(UserEntity.fromDomain(user))
                 Resource.Success(user)
@@ -236,7 +244,7 @@ class DarkTalkRepository(
                 if (cached != null) {
                     Resource.Success(cached.toDomain())
                 } else {
-                    Resource.Error("Failed to fetch profile: ${response.code()}")
+                    Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to fetch profile: ${response.code()}")
                 }
             }
         } catch (e: Exception) {
@@ -297,10 +305,11 @@ class DarkTalkRepository(
                 preferencesManager.username = user.username
                 preferencesManager.userEmail = user.email
                 user.avatar?.let { preferencesManager.userAvatar = it }
+                preferencesManager.userLanguage = user.language ?: language ?: preferencesManager.userLanguage
                 database.userDao().insertUser(UserEntity.fromDomain(user))
                 Resource.Success(user)
             } else {
-                val errorMsg = response.errorBody()?.string() ?: "Failed to update profile: ${response.code()}"
+                val errorMsg = parseServerError(response.errorBody()?.string()) ?: "Failed to update profile: ${response.code()}"
                 Resource.Error(errorMsg)
             }
         } catch (e: Exception) {
@@ -316,7 +325,7 @@ class DarkTalkRepository(
             if (response.isSuccessful && response.body() != null) {
                 Resource.Success(response.body()!!.users)
             } else {
-                val msg = response.errorBody()?.string() ?: "Failed to search users"
+                val msg = parseServerError(response.errorBody()?.string()) ?: "Failed to search users"
                 Resource.Error(msg)
             }
         } catch (e: Exception) {
@@ -331,7 +340,7 @@ class DarkTalkRepository(
             if (response.isSuccessful) {
                 Resource.Success(Unit)
             } else {
-                val msg = response.errorBody()?.string() ?: "Failed to add participants"
+                val msg = parseServerError(response.errorBody()?.string()) ?: "Failed to add participants"
                 Resource.Error(msg)
             }
         } catch (e: Exception) {
@@ -370,7 +379,7 @@ class DarkTalkRepository(
                 }
                 Resource.Success(result)
             } else {
-                Resource.Error("Failed to toggle 2FA: ${response.code()}")
+                Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to toggle 2FA: ${response.code()}")
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error toggling 2FA")
@@ -383,7 +392,7 @@ class DarkTalkRepository(
             if (response.isSuccessful && response.body() != null) {
                 Resource.Success(response.body()!!.devices)
             } else {
-                Resource.Error("Failed to load devices: ${response.code()}")
+                Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to load devices: ${response.code()}")
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error loading devices")
@@ -396,7 +405,7 @@ class DarkTalkRepository(
             if (response.isSuccessful && response.body() != null) {
                 Resource.Success(response.body()!!.loginHistory)
             } else {
-                Resource.Error("Failed to load login history")
+                Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to load login history")
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error loading login history")
@@ -411,9 +420,24 @@ class DarkTalkRepository(
                 val chats = response.body()!!.chats
                 val curId = preferencesManager.userId
 
-                val enrichedChats = chats.map { chat ->
-                    val lastMsg = chat.lastMessage ?: database.messageDao().getLatestMessageForChatSync(chat.id)?.toDomain()
-                    chat.copy(lastMessage = lastMsg)
+                val gate = Semaphore(6)
+                val enrichedChats = coroutineScope {
+                    chats.map { chat ->
+                        async(Dispatchers.IO) {
+                            var lastMsg = chat.lastMessage
+                            if (lastMsg == null) {
+                                val local = database.messageDao().getLatestMessageForChatSync(chat.id)?.toDomain()
+                                val lastId = chat.lastMessageId
+                                val needsFetch = lastId != null && (local == null || local.id < lastId)
+                                lastMsg = if (needsFetch) {
+                                    gate.withPermit {
+                                        runCatching { api.getMessages(chat.id, 1, null).body()?.messages?.lastOrNull() }.getOrNull()
+                                    }?.also { database.messageDao().insertMessage(MessageEntity.fromDomain(it)) } ?: local
+                                } else local
+                            }
+                            chat.copy(lastMessage = lastMsg)
+                        }
+                    }.awaitAll()
                 }
 
                 val validChatIds = enrichedChats.map { it.id }
@@ -447,7 +471,7 @@ class DarkTalkRepository(
                     }
                     Resource.Success(enriched)
                 } else {
-                    Resource.Error("Failed to load chats: ${response.code()}")
+                    Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to load chats: ${response.code()}")
                 }
             }
         } catch (e: Exception) {
@@ -471,7 +495,7 @@ class DarkTalkRepository(
             if (response.isSuccessful && response.body() != null) {
                 Resource.Success(response.body()!!.chatId)
             } else {
-                val msg = response.errorBody()?.string() ?: "Failed to create direct chat: ${response.code()}"
+                val msg = parseServerError(response.errorBody()?.string()) ?: "Failed to create direct chat: ${response.code()}"
                 Resource.Error(msg)
             }
         } catch (e: Exception) {
@@ -491,7 +515,7 @@ class DarkTalkRepository(
             if (response.isSuccessful && response.body() != null) {
                 Resource.Success(response.body()!!.chatId)
             } else {
-                val msg = response.errorBody()?.string() ?: "Failed to create group: ${response.code()}"
+                val msg = parseServerError(response.errorBody()?.string()) ?: "Failed to create group: ${response.code()}"
                 Resource.Error(msg)
             }
         } catch (e: Exception) {
@@ -521,7 +545,7 @@ class DarkTalkRepository(
                 if (cached != null) {
                     Resource.Success(cached.toDomain())
                 } else {
-                    Resource.Error("Failed to fetch chat info")
+                    Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to fetch chat info")
                 }
             }
         } catch (e: Exception) {
@@ -540,7 +564,7 @@ class DarkTalkRepository(
             if (response.isSuccessful && response.body() != null) {
                 Resource.Success(response.body()!!)
             } else {
-                val msg = response.errorBody()?.string() ?: "Failed to remove participant: ${response.code()}"
+                val msg = parseServerError(response.errorBody()?.string()) ?: "Failed to remove participant: ${response.code()}"
                 Resource.Error(msg)
             }
         } catch (e: Exception) {
@@ -556,7 +580,7 @@ class DarkTalkRepository(
                 database.messageDao().deleteMessagesForChat(chatId)
                 Resource.Success(Unit)
             } else {
-                Resource.Error("Failed to delete chat: ${response.code()}")
+                Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to delete chat: ${response.code()}")
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error deleting chat")
@@ -564,50 +588,34 @@ class DarkTalkRepository(
     }
 
     suspend fun getMessages(chatId: Long, limit: Int = 50, beforeId: Long? = null): Resource<MessagesPageResponse> {
+        suspend fun cachedPage(): MessagesPageResponse? {
+            if (beforeId != null) return null
+            val cached = database.messageDao().getMessagesForChatSync(chatId)
+            return if (cached.isEmpty()) null
+            else MessagesPageResponse(status = "success", chatId = chatId, messages = cached.map { it.toDomain() })
+        }
         return try {
             val response = api.getMessages(chatId, limit, beforeId)
             if (response.isSuccessful && response.body() != null) {
                 val page = response.body()!!
                 if (page.messages.isNotEmpty()) {
                     database.messageDao().insertMessages(page.messages.map { MessageEntity.fromDomain(it) })
-                    // Keep at least the last 10 messages for each chat in persistent memory
-                    database.messageDao().trimOldMessages(chatId, keepCount = 10)
+                    database.messageDao().trimOldMessages(chatId, keepCount = 50)
                 }
                 Resource.Success(page)
             } else {
-                val cached = database.messageDao().getMessagesForChatSync(chatId)
-                if (cached.isNotEmpty()) {
-                    Resource.Success(
-                        MessagesPageResponse(
-                            status = "success",
-                            chatId = chatId,
-                            messages = cached.map { it.toDomain() }
-                        )
-                    )
-                } else {
-                    Resource.Error("Failed to fetch messages: ${response.code()}")
-                }
+                cachedPage()?.let { Resource.Success(it) }
+                    ?: Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to fetch messages: ${response.code()}")
             }
         } catch (e: Exception) {
-            val cached = database.messageDao().getMessagesForChatSync(chatId)
-            if (cached.isNotEmpty()) {
-                Resource.Success(
-                    MessagesPageResponse(
-                        status = "success",
-                        chatId = chatId,
-                        messages = cached.map { it.toDomain() }
-                    )
-                )
-            } else {
-                Resource.Error(e.localizedMessage ?: "Error loading messages")
-            }
+            cachedPage()?.let { Resource.Success(it) } ?: Resource.Error(e.localizedMessage ?: "Error loading messages")
         }
     }
 
     suspend fun persistMessage(message: Message) {
         database.messageDao().insertMessage(MessageEntity.fromDomain(message))
-        // Maintain at least the last 10 messages per chat
-        database.messageDao().trimOldMessages(message.chatId, keepCount = 10)
+        // Maintain at least the last 50 messages per chat
+        database.messageDao().trimOldMessages(message.chatId, keepCount = 50)
 
         // Also update lastMessage in ChatEntity in Room DB
         val chatEntity = database.chatDao().getChatByIdSync(message.chatId)
@@ -650,7 +658,7 @@ class DarkTalkRepository(
             if (response.isSuccessful) {
                 Resource.Success(Unit)
             } else {
-                Resource.Error("Failed to send message: ${response.code()}")
+                Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to send message: ${response.code()}")
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error sending message")
@@ -687,7 +695,7 @@ class DarkTalkRepository(
             if (response.isSuccessful) {
                 Resource.Success(Unit)
             } else {
-                Resource.Error("Failed to upload attachment: ${response.code()}")
+                Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to upload attachment: ${response.code()}")
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Attachment upload failed")
@@ -698,21 +706,18 @@ class DarkTalkRepository(
         if (targetFile.exists() && targetFile.length() > 0) return true
         val resolvedUrl = MediaUrlUtils.resolveUrl(rawUrl) ?: return false
         return withContext(Dispatchers.IO) {
+            val part = File(targetFile.path + ".part")
             try {
-                val request = Request.Builder()
-                    .url(resolvedUrl)
-                    .build()
-                val response = networkClient.okHttpClient.newCall(request).execute()
-                if (response.isSuccessful && response.body != null) {
-                    targetFile.parentFile?.mkdirs()
-                    targetFile.outputStream().use { output ->
-                        response.body!!.byteStream().copyTo(output)
-                    }
-                    true
-                } else {
-                    false
+                targetFile.parentFile?.mkdirs()
+                val request = Request.Builder().url(resolvedUrl).build()
+                networkClient.okHttpClient.newCall(request).execute().use { response ->
+                    val body = response.body
+                    if (!response.isSuccessful || body == null) return@withContext false
+                    part.outputStream().use { out -> body.byteStream().copyTo(out) }
                 }
+                part.renameTo(targetFile)
             } catch (e: Exception) {
+                part.delete()
                 false
             }
         }
@@ -727,24 +732,23 @@ class DarkTalkRepository(
             if (response.isSuccessful) {
                 Resource.Success(Unit)
             } else {
-                Resource.Error("Failed to edit message: ${response.code()}")
+                Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to edit message: ${response.code()}")
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error editing message")
         }
     }
 
-    suspend fun deleteMessage(chatId: Long, messageId: Long): Resource<Unit> {
-        val sentViaWs = webSocketManager.sendRoomDeleteMessage(messageId)
-        if (sentViaWs) return Resource.Success(Unit)
+    suspend fun deleteMessage(chatId: Long, messageId: Long, forceHttp: Boolean = false): Resource<Unit> {
+        if (!forceHttp && webSocketManager.sendRoomDeleteMessage(messageId)) return Resource.Success(Unit)
 
         return try {
             val response = api.deleteMessage(messageId)
             if (response.isSuccessful) {
-                database.messageDao().deleteMessageById(messageId)
+                database.messageDao().markMessageDeleted(messageId)
                 Resource.Success(Unit)
             } else {
-                Resource.Error("Failed to delete message: ${response.code()}")
+                Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to delete message: ${response.code()}")
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error deleting message")
@@ -773,7 +777,7 @@ class DarkTalkRepository(
             if (response.isSuccessful && response.body() != null) {
                 Resource.Success(response.body()!!.messageReaction)
             } else {
-                Resource.Error("Failed to add reaction: ${response.code()}")
+                Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to add reaction: ${response.code()}")
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error adding reaction")
@@ -786,7 +790,7 @@ class DarkTalkRepository(
             if (response.isSuccessful) {
                 Resource.Success(Unit)
             } else {
-                Resource.Error("Failed to remove reaction: ${response.code()}")
+                Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to remove reaction: ${response.code()}")
             }
         } catch (e: Exception) {
             Resource.Error(e.localizedMessage ?: "Error removing reaction")

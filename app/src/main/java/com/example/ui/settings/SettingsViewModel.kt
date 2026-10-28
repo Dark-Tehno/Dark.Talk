@@ -59,10 +59,7 @@ data class SettingsUiState(
     // Network tab
     val serverDomain: String = "",
     val useSsl: Boolean = true,
-    val appSecretKey: String = "",
     val deviceId: String = "",
-    val clientName: String = "",
-    val clientVersion: String = "",
     val isNetworkSaved: Boolean = false,
     val pingResult: String? = null,
     val isPinging: Boolean = false,
@@ -90,10 +87,7 @@ class SettingsViewModel(private val repository: DarkTalkRepository) : ViewModel(
         SettingsUiState(
             serverDomain = prefs.serverDomain,
             useSsl = prefs.useSsl,
-            appSecretKey = prefs.appSecretKey,
             deviceId = prefs.deviceId,
-            clientName = prefs.clientName,
-            clientVersion = prefs.clientVersion,
             twoFactorEnabled = prefs.twoFactorEnabled,
             maxCacheMb = prefs.maxCacheMb,
             customCacheGbInput = prefs.customCacheGb,
@@ -480,10 +474,6 @@ class SettingsViewModel(private val repository: DarkTalkRepository) : ViewModel(
         _uiState.update { it.copy(useSsl = useSsl, isNetworkSaved = false) }
     }
 
-    fun updateAppSecretKey(key: String) {
-        _uiState.update { it.copy(appSecretKey = key, isNetworkSaved = false) }
-    }
-
     fun updateDeviceId(id: String) {
         _uiState.update { it.copy(deviceId = id, isNetworkSaved = false) }
     }
@@ -497,7 +487,6 @@ class SettingsViewModel(private val repository: DarkTalkRepository) : ViewModel(
 
         prefs.serverDomain = domain
         prefs.useSsl = _uiState.value.useSsl
-        prefs.appSecretKey = _uiState.value.appSecretKey
         prefs.deviceId = _uiState.value.deviceId
 
         repository.updateApiConfig()

@@ -12,6 +12,15 @@ sealed class WsEvent {
     data class MessageRead(val chatId: Long, val messageId: Long, val userId: Long, val readAt: String?) : WsEvent()
     data class Typing(val chatId: Long, val userId: Long, val isTyping: Boolean) : WsEvent()
     data class Error(val code: String, val message: String?) : WsEvent()
+
+    /** Сигналинг звонка (call_incoming, call_offer, call_ice, call_ended, ...). Полный JSON сохранён в [json]. */
+    data class CallSignal(
+        val type: String,
+        val callId: String?,
+        val chatId: Long?,
+        val userId: Long?,
+        val json: org.json.JSONObject
+    ) : WsEvent()
 }
 
 @JsonClass(generateAdapter = true)

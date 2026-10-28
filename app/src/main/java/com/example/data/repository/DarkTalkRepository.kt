@@ -227,6 +227,16 @@ class DarkTalkRepository(
         }
     }
 
+    /** STUN/TURN для звонков. При ошибке возвращает пустой список (клиент подставит публичный STUN). */
+    suspend fun getIceServers(): List<IceServerDto> {
+        return try {
+            val response = api.getIceServers()
+            if (response.isSuccessful) response.body()?.iceServers.orEmpty() else emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     suspend fun getProfile(): Resource<User> {
         return try {
             val response = api.getProfile()

@@ -18,7 +18,6 @@ class PreferencesManager(context: Context) {
     companion object {
         private const val KEY_SERVER_DOMAIN = "server_domain"
         private const val KEY_USE_SSL = "use_ssl"
-        private const val KEY_APP_SECRET = "app_secret"
         private const val KEY_AUTH_TOKEN = "auth_token"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_USER_ID = "user_id"
@@ -73,32 +72,6 @@ class PreferencesManager(context: Context) {
             return prefs.getBoolean(KEY_USE_SSL, true)
         }
         set(value) = prefs.edit().putBoolean(KEY_USE_SSL, value).apply()
-
-    var appSecretKey: String
-        get() {
-            val saved = prefs.getString(KEY_APP_SECRET, null)
-            return if (!saved.isNullOrBlank()) {
-                saved
-            } else {
-                runCatching { BuildConfig.DARK_TALK_SECRET_KEY }.getOrNull()?.takeIf { it.isNotBlank() }
-                    ?: "darktalk_secret_key_prod"
-            }
-        }
-        set(value) = prefs.edit().putString(KEY_APP_SECRET, value.trim()).apply()
-
-    var clientName: String
-        get() = runCatching { BuildConfig.APP_CLIENT_NAME }.getOrNull()?.takeIf { it.isNotBlank() } ?: "DarkTalk"
-        set(_) {}
-
-    var clientVersion: String
-        get() = runCatching { BuildConfig.APP_CLIENT_VERSION }.getOrNull()?.takeIf { it.isNotBlank() } ?: "1.0.0"
-        set(_) {}
-
-    val secretKeyHeader: String
-        get() = "${appSecretKey}--${clientName}|${clientVersion}"
-
-    val wsSecretKeyHeader: String
-        get() = secretKeyHeader
 
     val httpBaseUrl: String
         get() {

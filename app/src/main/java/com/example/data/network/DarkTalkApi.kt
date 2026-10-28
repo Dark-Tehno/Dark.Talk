@@ -12,6 +12,10 @@ interface DarkTalkApi {
     @GET("ping/")
     suspend fun ping(): Response<PingResponse>
 
+    // Calls (WebRTC): STUN/TURN
+    @GET("call/api/ice-servers/")
+    suspend fun getIceServers(): Response<IceServersResponse>
+
     // Account API
     @POST("account/api/auth/register/")
     suspend fun register(@Body request: RegisterRequest): Response<AuthResponse>

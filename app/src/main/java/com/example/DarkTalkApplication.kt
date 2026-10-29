@@ -7,6 +7,8 @@ import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import coil.request.CachePolicy
+import com.example.call.CallManager
+import com.example.call.CallNotifications
 import com.example.data.local.PreferencesManager
 import com.example.data.local.db.AppDatabase
 import com.example.data.network.DarkTalkWebSocketManager
@@ -25,6 +27,9 @@ class DarkTalkApplication : Application(), ImageLoaderFactory {
         private set
 
     lateinit var database: AppDatabase
+        private set
+
+    lateinit var callManager: CallManager
         private set
 
     lateinit var repository: DarkTalkRepository
@@ -49,7 +54,15 @@ class DarkTalkApplication : Application(), ImageLoaderFactory {
             database = database
         )
 
-        // Explicitly set Coil global ImageLoader so all image requests pass Authorization token & secret key
+        CallNotifications.ensureChannels(this)
+        callManager = CallManager(
+            context = this,
+            repository = repository,
+            webSocketManager = webSocketManager,
+            prefs = preferencesManager
+        )
+
+        // Explicitly set Coil global ImageLoader so all image requests pass the Authorization token
         val imageLoader = newImageLoader()
         Coil.setImageLoader(imageLoader)
 

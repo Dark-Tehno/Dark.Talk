@@ -23,14 +23,13 @@ class NetworkClient(private val preferencesManager: PreferencesManager) {
         val original = chain.request()
         val configured = preferencesManager.httpBaseUrl.toHttpUrlOrNull()
 
-        // Токен и секрет отправляем ТОЛЬКО на наш сервер (раньше уходили на любой хост,
+        // Токен отправляем ТОЛЬКО на наш сервер (раньше уходили на любой хост,
         // например на внешний CDN с аватаркой).
         val isOurServer = configured != null &&
                 (original.url.host == configured.host || original.url.host == MediaUrlUtils.DEFAULT_DOMAIN)
 
         val request = if (isOurServer && configured != null) {
             val builder = original.newBuilder()
-            builder.header("Dark-Talk-Secret-Key", preferencesManager.secretKeyHeader)
             preferencesManager.authToken?.takeIf { it.isNotBlank() }?.let {
                 builder.header("Authorization", "Token $it")
             }
@@ -61,7 +60,6 @@ class NetworkClient(private val preferencesManager: PreferencesManager) {
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE
                 redactHeader("Authorization")
-                redactHeader("Dark-Talk-Secret-Key")
             })
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)

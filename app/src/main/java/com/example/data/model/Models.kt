@@ -274,3 +274,17 @@ data class PingResponse(
     @Json(name = "server_time") val serverTime: String? = null,
     @Json(name = "server_utc") val serverUtc: String? = null
 )
+
+@JsonClass(generateAdapter = true)
+data class IceServerDto(
+    @Json(name = "urls") val urls: List<String> = emptyList(),
+    @Json(name = "username") val username: String? = null,
+    @Json(name = "credential") val credential: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class IceServersResponse(
+    @Json(name = "status") val status: String? = null,
+    @Json(name = "ice_servers") val iceServers: List<IceServerDto> = emptyList(),
+    @Json(name = "ttl") val ttl: Int? = null
+)

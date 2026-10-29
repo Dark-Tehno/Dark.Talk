@@ -83,7 +83,6 @@ class DarkTalkWebSocketManager(
         return Request.Builder()
             .url("${preferencesManager.wsBaseUrl}$path")
             .addHeader("Authorization", "Token $token")
-            .addHeader("Dark-Talk-Secret-Key", preferencesManager.wsSecretKeyHeader)
             .addHeader("Origin", preferencesManager.httpBaseUrl.trimEnd('/'))
             .build()
     }
@@ -245,6 +244,12 @@ class DarkTalkWebSocketManager(
         return chatRoomWebSocket?.send(json) ?: false
     }
 
+    /** Сигналинг звонков идёт по общему сокету /ws/chats/. */
+    fun sendCallEvent(json: JSONObject): Boolean {
+        if (_connectionState.value != WsConnectionState.CONNECTED) return false
+        return chatsWebSocket?.send(json.toString()) ?: false
+    }
+
     fun sendRoomTextMessage(text: String, replyTo: Long? = null, clientMessageId: String? = null): Boolean =
         sendInRoom(sendMessageAdapter.toJson(WsSendMessagePayload(text = text, replyTo = replyTo, clientMessageId = clientMessageId)))
 
@@ -267,7 +272,20 @@ class DarkTalkWebSocketManager(
             // В ошибках поле "message" – строка (в остальных событиях – объект Message),
             // поэтому ошибки разбираем отдельно, иначе Moshi падает и ошибка теряется.
             val head = JSONObject(jsonText)
-            if (head.optString("type") == "error") {
+            val headType = head.optString("type")
+            if (headType.startsWith("call_")) {
+                emit(
+                    WsEvent.CallSignal(
+                        type = headType,
+                        callId = head.optString("call_id").takeIf { it.isNotBlank() },
+                        chatId = if (head.has("chat_id")) head.optLong("chat_id") else null,
+                        userId = if (head.has("user_id")) head.optLong("user_id") else null,
+                        json = head
+                    )
+                )
+                return
+            }
+            if (headType == "error") {
                 val msg = head.optString("message").takeIf { it.isNotBlank() }
                 emit(WsEvent.Error(head.optString("code", "unknown_error"), msg))
                 return

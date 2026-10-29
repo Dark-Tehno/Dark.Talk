@@ -51,6 +51,11 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.DarkTalkApplication
+import com.example.call.CallPeer
+import com.example.call.CallPhase
+import com.example.ui.call.describeCallMessage
+import com.example.ui.call.rememberCallPermissionRequester
 import com.example.data.model.Chat
 import com.example.data.model.Message
 import com.example.data.model.User
@@ -127,6 +132,18 @@ fun ChatRoomScreen(
         otherUser?.isOnline == true -> "online"
         otherUser != null -> MediaUrlUtils.formatLastSeen(otherUser.lastOnline)
         else -> null
+    }
+
+    // ---- звонки (только личные чаты) ----
+    val callManager = remember { DarkTalkApplication.instance.callManager }
+    val callState by callManager.state.collectAsState()
+    val requestCallPermissions = rememberCallPermissionRequester()
+    val enStrings = LocalAppStrings.current === com.example.util.EnTranslations
+    fun startCall(video: Boolean) {
+        val peer = otherUser ?: return
+        requestCallPermissions(video) {
+            callManager.startCall(viewModel.chatId, CallPeer(peer.id, peer.username, peer.avatar), video)
+        }
     }
 
     // ---- голосовая запись ----
@@ -303,6 +320,15 @@ fun ChatRoomScreen(
                     )
                 },
                 actions = {
+                    if (!isGroup && otherUser != null) {
+                        val idle = callState.phase == CallPhase.IDLE
+                        IconButton(onClick = { startCall(false) }, enabled = idle) {
+                            Icon(Icons.Default.Call, contentDescription = "Voice call", tint = accent)
+                        }
+                        IconButton(onClick = { startCall(true) }, enabled = idle) {
+                            Icon(Icons.Default.Videocam, contentDescription = "Video call", tint = accent)
+                        }
+                    }
                     if (canModerate) {
                         IconButton(onClick = { isAddParticipantOpen = true }) {
                             Icon(Icons.Default.PersonAdd, contentDescription = "Add Participants", tint = accent)
@@ -367,7 +393,24 @@ fun ChatRoomScreen(
                                             )
                                         }
                                     }
-                                    is RoomItem.Msg -> {
+                                    is RoomItem.Msg -> if (item.message.messageType == "system") {
+                                        val m = item.message
+                                        Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier
+                                                    .glass(RoundedCornerShape(50), strength = 0.7f, baseAlpha = 0.4f)
+                                                    .padding(horizontal = 12.dp, vertical = 5.dp)
+                                            ) {
+                                                Icon(Icons.Default.Call, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(14.dp))
+                                                Spacer(Modifier.width(6.dp))
+                                                Text(
+                                                    text = describeCallMessage(m, myId, enStrings) ?: m.text.orEmpty(),
+                                                    color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium
+                                                )
+                                            }
+                                        }
+                                    } else {
                                         val m = item.message
                                         MessageBubble(
                                             message = m,

@@ -1,10 +1,13 @@
 package com.example
 
 import android.net.Uri
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
@@ -19,7 +22,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.call.CallNotifications
+import com.example.call.CallPhase
 import com.example.data.repository.DarkTalkRepository
+import com.example.ui.call.CallHost
+import com.example.ui.call.rememberCallPermissionRequester
 import com.example.ui.auth.AuthScreen
 import com.example.ui.auth.AuthViewModel
 import com.example.ui.chat.ChatRoomScreen
@@ -40,7 +47,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val repository = (application as DarkTalkApplication).repository
+        // Экран входящего звонка поверх блокировки
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        }
+        pendingAnswer = intent?.action == CallNotifications.ACTION_ANSWER
+
+        val app = application as DarkTalkApplication
+        val repository = app.repository
 
         setContent {
             // Реактивная тема и реактивный язык приложения
@@ -58,11 +73,48 @@ class MainActivity : ComponentActivity() {
                             color = Color.Transparent,
                             contentColor = TextPrimary
                         ) {
-                            DarkTalkNavGraph(repository = repository)
+                            Box(Modifier.fillMaxSize()) {
+                                DarkTalkNavGraph(repository = repository)
+                                CallHost(manager = app.callManager)
+                                AnswerFromNotification(app)
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action == CallNotifications.ACTION_ANSWER) pendingAnswer = true
+    }
+
+    companion object {
+        /** Пользователь нажал «Принять» в уведомлении: принимаем после запроса разрешений. */
+        var pendingAnswerState by androidx.compose.runtime.mutableStateOf(false)
+    }
+
+    private var pendingAnswer: Boolean
+        get() = pendingAnswerState
+        set(value) { pendingAnswerState = value }
+}
+
+@Composable
+private fun AnswerFromNotification(app: DarkTalkApplication) {
+    val state by app.callManager.state.collectAsState()
+    val requestPermissions = rememberCallPermissionRequester()
+    val wanted = MainActivity.pendingAnswerState
+    LaunchedEffect(wanted, state.phase) {
+        if (!wanted) return@LaunchedEffect
+        if (state.phase == CallPhase.INCOMING) {
+            MainActivity.pendingAnswerState = false
+            requestPermissions(state.isVideoCall) { app.callManager.accept() }
+        } else if (state.phase != CallPhase.IDLE || state.callId == null) {
+            // звонок уже завершён или ещё не пришёл: не держим флаг дольше нескольких секунд
+            kotlinx.coroutines.delay(5000)
+            MainActivity.pendingAnswerState = false
         }
     }
 }

@@ -716,7 +716,6 @@ fun NetworkTabContent(
     viewModel: SettingsViewModel
 ) {
     var domainInput by remember(uiState.serverDomain) { mutableStateOf(uiState.serverDomain) }
-    var secretKeyInput by remember(uiState.appSecretKey) { mutableStateOf(uiState.appSecretKey) }
     var deviceIdInput by remember(uiState.deviceId) { mutableStateOf(uiState.deviceId) }
     var useSslState by remember(uiState.useSsl) { mutableStateOf(uiState.useSsl) }
 
@@ -894,9 +893,9 @@ fun NetworkTabContent(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Secret Key & Device ID
+        // Device ID
         Text(
-            text = "Application Headers",
+            text = "Device",
             style = MaterialTheme.typography.titleMedium.copy(
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary
@@ -904,20 +903,6 @@ fun NetworkTabContent(
         )
 
         Spacer(modifier = Modifier.height(14.dp))
-
-        CyberTextField(
-            value = secretKeyInput,
-            onValueChange = {
-                secretKeyInput = it
-                viewModel.updateAppSecretKey(it)
-            },
-            label = "Application Secret Key",
-            placeholder = "darktalk_secret_key_prod",
-            leadingIcon = { Icon(Icons.Default.VpnKey, contentDescription = null, tint = CyanAccent) },
-            testTag = "settings_secret_key_input"
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
 
         CyberTextField(
             value = deviceIdInput,

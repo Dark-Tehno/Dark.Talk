@@ -112,6 +112,8 @@ class CallManager(
     private var isCaller = false
     private var iceRestartDone = false
     private var disconnectWatchdog: Job? = null
+    private var pingJob: Job? = null
+    private var lostSocketInCall = false
     private var savedAudioMode: Int? = null
 
     private sealed interface Cmd {
@@ -129,6 +131,7 @@ class CallManager(
         data class StartScreen(val data: Intent) : Cmd
         data object StopScreen : Cmd
         data object SocketLost : Cmd
+        data object SocketBack : Cmd
         data object ClearEnded : Cmd
     }
 
@@ -136,10 +139,15 @@ class CallManager(
         scope.launch { webSocketManager.events.collect { if (it is WsEvent.CallSignal) inbox.trySend(Cmd.Signal(it)) } }
         scope.launch {
             var wasConnected = false
+            var lost = false
             webSocketManager.connectionState.collect { s ->
-                if (s == WsConnectionState.CONNECTED) wasConnected = true
-                else if (wasConnected) {
+                if (s == WsConnectionState.CONNECTED) {
+                    if (lost) inbox.trySend(Cmd.SocketBack)
+                    wasConnected = true
+                    lost = false
+                } else if (wasConnected) {
                     wasConnected = false
+                    lost = true
                     inbox.trySend(Cmd.SocketLost)
                 }
             }
@@ -219,9 +227,21 @@ class CallManager(
             is Cmd.StartScreen -> onStartScreen(cmd.data)
             Cmd.StopScreen -> stopScreen()
             Cmd.SocketLost -> {
-                // Сервер завершает звонок при обрыве сигнального сокета, а call_ended мы уже не получим.
-                if (_state.value.phase != CallPhase.IDLE && _state.value.phase != CallPhase.ENDED) {
+                val phase = _state.value.phase
+                if (phase == CallPhase.OUTGOING || phase == CallPhase.INCOMING) {
+                    // Сервер отменяет вызов при обрыве сокета звонящего; входящий вернётся при переподключении.
                     finishLocally("connection_lost")
+                } else if (phase == CallPhase.CONNECTING || phase == CallPhase.ACTIVE) {
+                    lostSocketInCall = true // идущий звонок пережидает обрыв: медиа идёт напрямую
+                }
+            }
+            Cmd.SocketBack -> {
+                val phase = _state.value.phase
+                if (lostSocketInCall && (phase == CallPhase.CONNECTING || phase == CallPhase.ACTIVE)) {
+                    lostSocketInCall = false
+                    sendPing()
+                    // сеть могла смениться (Wi-Fi/LTE): перезапускаем ICE
+                    if (isCaller && pc != null) sendOffer(iceRestart = true)
                 }
             }
             Cmd.ClearEnded -> if (_state.value.phase == CallPhase.ENDED) _state.value = CallUiState()
@@ -274,6 +294,8 @@ class CallManager(
         buildPeerConnection(startCamera = s.isVideoCall && hasPermission(Manifest.permission.CAMERA))
         send("call_accept", "call_id" to s.callId)
         CallService.sync(context)
+        startPing()
+        startWatchdog(40_000)
     }
 
     private fun onHangUp() {
@@ -342,6 +364,8 @@ class CallManager(
                     sounds.stopAll()
                     _state.update { it.copy(phase = CallPhase.CONNECTING) }
                     CallService.sync(context)
+                    startPing()
+                    startWatchdog(40_000)
                     buildPeerConnection(startCamera = s.isVideoCall && hasPermission(Manifest.permission.CAMERA))
                     sendOffer(iceRestart = false)
                 }
@@ -375,6 +399,10 @@ class CallManager(
                 val code = e.json.optString("code")
                 // Ошибка нашей попытки позвонить (busy, group_calls_unsupported, ...)
                 if (s.phase == CallPhase.OUTGOING && s.callId == null) finishLocally(code)
+                // Сервер считает звонок завершённым (например, мы слишком долго были без связи)
+                else if (code == "call_not_found" && e.callId != null && e.callId == s.callId &&
+                    (s.phase == CallPhase.CONNECTING || s.phase == CallPhase.ACTIVE)
+                ) finishLocally("connection_lost")
             }
         }
     }
@@ -449,13 +477,18 @@ class CallManager(
             it.setEnabled(!_state.value.micMuted)
             connection.addTrack(it, listOf("call"))
         }
-        // Видео-трансивер создаём всегда (даже в аудиозвонке): включение камеры или экрана потом
-        // делается подменой трека без повторного обмена SDP.
-        val transceiver = connection.addTransceiver(
-            MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
-            RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_RECV, listOf("call"))
-        )
-        videoSender = transceiver.sender
+        // Звонящий создаёт видео-трансивер всегда (даже в аудиозвонке): включение камеры или экрана
+        // потом делается подменой трека без повторного обмена SDP.
+        // У принимающего трансивер, созданный через addTransceiver, WebRTC при применении чужого offer
+        // НЕ переиспользует (только созданные через addTrack), поэтому он берёт трансивер из offer
+        // (см. attachVideoSenderFromOffer).
+        if (isCaller) {
+            val transceiver = connection.addTransceiver(
+                MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
+                RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_RECV, listOf("call"))
+            )
+            videoSender = transceiver.sender
+        }
         if (startCamera) startCameraCapture()
     }
 
@@ -477,11 +510,23 @@ class CallManager(
         // Столкновение офферов: звонящий (impolite) игнорирует чужой, принимающий (polite) откатывается сам.
         if (connection.signalingState() == PeerConnection.SignalingState.HAVE_LOCAL_OFFER && isCaller) return
         connection.setRemoteSuspend(SessionDescription(SessionDescription.Type.OFFER, sdp))
+        attachVideoSenderFromOffer(connection)
         drainCandidates()
         val answer = connection.createAnswerSuspend(MediaConstraints())
         connection.setLocalSuspend(answer)
         send("call_answer", "call_id" to _state.value.callId, "sdp" to answer.description)
         sendMediaState()
+    }
+
+    /** Принимающая сторона: берёт видео-трансивер из offer, разрешает отправку и подключает текущий локальный трек. */
+    private fun attachVideoSenderFromOffer(connection: PeerConnection) {
+        if (videoSender != null) return
+        val transceiver = connection.transceivers.firstOrNull {
+            it.mediaType == MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO
+        } ?: return
+        transceiver.setDirection(RtpTransceiver.RtpTransceiverDirection.SEND_RECV)
+        videoSender = transceiver.sender
+        (screenTrack ?: cameraTrack)?.let { videoSender?.setTrack(it, false) }
     }
 
     private suspend fun onRemoteAnswer(sdp: String) {
@@ -533,10 +578,25 @@ class CallManager(
         }
     }
 
-    private fun startWatchdog() {
+    /** Сигнал «я на связи»: по нему сервер понимает, что звонок жив, даже если сокет переподключался. */
+    private fun startPing() {
+        pingJob?.cancel()
+        pingJob = scope.launch {
+            while (true) {
+                sendPing()
+                delay(8_000)
+            }
+        }
+    }
+
+    private fun sendPing() {
+        _state.value.callId?.let { send("call_ping", "call_id" to it) }
+    }
+
+    private fun startWatchdog(timeoutMs: Long = 25_000) {
         disconnectWatchdog?.cancel()
         disconnectWatchdog = scope.launch {
-            delay(20_000)
+            delay(timeoutMs)
             if (_state.value.phase == CallPhase.ACTIVE || _state.value.phase == CallPhase.CONNECTING) {
                 _state.value.callId?.let { send("call_end", "call_id" to it) }
                 finishLocally("connection_lost")
@@ -689,6 +749,8 @@ class CallManager(
     private fun finishLocally(reason: String) {
         val before = _state.value
         disconnectWatchdog?.cancel()
+        pingJob?.cancel()
+        lostSocketInCall = false
         sounds.stopAll()
         CallNotifications.cancelIncoming(context)
 

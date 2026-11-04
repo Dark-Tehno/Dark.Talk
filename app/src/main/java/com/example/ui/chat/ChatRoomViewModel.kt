@@ -248,9 +248,8 @@ class ChatRoomViewModel(
 
     private fun markDeletedLocally(messageId: Long) {
         _uiState.update { state ->
-            state.copy(messages = state.messages.map {
-                if (it.id == messageId) it.copy(isDeleted = true, text = "", attachment = null, attachmentName = null, attachmentSize = null) else it
-            })
+            // сервер удаляет сообщение полностью: просто убираем его из списка
+            state.copy(messages = state.messages.filterNot { it.id == messageId })
         }
     }
 

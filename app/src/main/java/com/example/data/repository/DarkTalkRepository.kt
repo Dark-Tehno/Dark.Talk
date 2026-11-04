@@ -62,7 +62,7 @@ class DarkTalkRepository(
                         database.messageDao().insertMessage(MessageEntity.fromDomain(event.message))
                     }
                     is WsEvent.MessageDeleted -> {
-                        database.messageDao().markMessageDeleted(event.messageId)
+                        database.messageDao().deleteMessageById(event.messageId)
                     }
                     else -> {}
                 }
@@ -755,7 +755,7 @@ class DarkTalkRepository(
         return try {
             val response = api.deleteMessage(messageId)
             if (response.isSuccessful) {
-                database.messageDao().markMessageDeleted(messageId)
+                database.messageDao().deleteMessageById(messageId)
                 Resource.Success(Unit)
             } else {
                 Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to delete message: ${response.code()}")

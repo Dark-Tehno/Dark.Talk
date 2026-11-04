@@ -1114,6 +1114,22 @@ fun MessageBubble(
                     }
                 }
 
+                if (replyMessage == null && message.replyDeleted) {
+                    // как в Telegram: цитата удалённого сообщения, нажатие никуда не ведёт
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 6.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black.copy(alpha = 0.18f))
+                            .padding(6.dp)
+                    ) {
+                        Box(Modifier.width(3.dp).height(20.dp).background(contentTint.copy(alpha = 0.5f), CircleShape))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Deleted message", color = Color.White.copy(alpha = 0.6f), fontStyle = FontStyle.Italic, fontSize = 12.sp, maxLines = 1)
+                    }
+                }
+
                 if (!message.isDeleted && !message.attachment.isNullOrBlank()) {
                     if (message.messageType == "voice_message") {
                         VoiceMessagePlayer(

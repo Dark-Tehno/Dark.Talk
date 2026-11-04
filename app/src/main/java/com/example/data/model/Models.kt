@@ -180,6 +180,8 @@ data class Message(
     @Json(name = "chat_id") val chatId: Long,
     @Json(name = "sender") val sender: User? = null,
     @Json(name = "reply_to") val replyTo: Long? = null,
+    /** Сообщение, на которое отвечали, удалено (replyTo при этом null). */
+    @Json(name = "reply_deleted") val replyDeleted: Boolean = false,
     @Json(name = "message_type") val messageType: String = "text", // "text", "image", "file", "voice_message", "system"
     @Json(name = "text") val text: String? = null,
     @Json(name = "attachment") val attachment: String? = null,

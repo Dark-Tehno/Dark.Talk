@@ -217,10 +217,10 @@ fun ChatsScreen(
                     ) {
                         Text(
                             text = when (filter) {
-                                ChatFilter.ALL -> "All"
-                                ChatFilter.DIRECT -> "Direct"
-                                ChatFilter.GROUPS -> "Groups"
-                                ChatFilter.UNREAD -> "Unread"
+                                ChatFilter.ALL -> strings.filterAll
+                                ChatFilter.DIRECT -> strings.filterDirect
+                                ChatFilter.GROUPS -> strings.filterGroups
+                                ChatFilter.UNREAD -> strings.filterUnread
                             },
                             color = if (selected) accent else TextSecondary,
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
@@ -256,12 +256,12 @@ fun ChatsScreen(
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = if (uiState.searchQuery.isNotBlank()) "No matching chats found" else "No conversations yet",
+                            text = if (uiState.searchQuery.isNotBlank()) strings.noChatsFound else strings.noChatsFound,
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Tap the pencil button to find users and start a chat.",
+                            text = strings.startConversationSubtitle,
                             style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary),
                             textAlign = TextAlign.Center
                         )
@@ -295,14 +295,14 @@ fun ChatsScreen(
             GlassDialog(onDismiss = { viewModel.closeDirectDialog() }, accent = accent) {
                 Text(strings.newDirectChat, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = TextPrimary))
                 Spacer(modifier = Modifier.height(6.dp))
-                Text("Search users by username", style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary))
+                Text(strings.enterUsernamePlaceholder, style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary))
                 Spacer(modifier = Modifier.height(14.dp))
 
                 CyberTextField(
                     value = directUsername,
                     onValueChange = { directUsername = it; viewModel.searchUsers(it) },
-                    label = "User Search",
-                    placeholder = "Search username...",
+                    label = strings.enterUsernamePlaceholder,
+                    placeholder = strings.enterUsernamePlaceholder,
                     leadingIcon = { Icon(Icons.Default.PersonSearch, contentDescription = null, tint = accent) },
                     testTag = "direct_username_input"
                 )
@@ -332,11 +332,11 @@ fun ChatsScreen(
                 Spacer(modifier = Modifier.height(18.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = { viewModel.closeDirectDialog() }, modifier = Modifier.testTag("cancel_direct_chat_button")) {
-                        Text("Cancel", color = TextSecondary)
+                        Text(strings.cancel, color = TextSecondary)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     CyberButton(
-                        text = "Start Chat",
+                        text = strings.newDirectChat,
                         onClick = { viewModel.createDirectChat(directUsername) },
                         enabled = directUsername.isNotBlank(),
                         isLoading = uiState.isLoading,
@@ -355,8 +355,8 @@ fun ChatsScreen(
                 CyberTextField(
                     value = groupTitle,
                     onValueChange = { groupTitle = it },
-                    label = "Group Title",
-                    placeholder = "e.g. Project Team",
+                    label = strings.groupNamePlaceholder,
+                    placeholder = strings.groupNamePlaceholder,
                     leadingIcon = { Icon(Icons.Default.Title, contentDescription = null, tint = VioletAccent) },
                     testTag = "group_title_input"
                 )
@@ -364,8 +364,8 @@ fun ChatsScreen(
                 CyberTextField(
                     value = groupDescription,
                     onValueChange = { groupDescription = it },
-                    label = "Description (Optional)",
-                    placeholder = "Group topic or rules",
+                    label = strings.groupDescPlaceholder,
+                    placeholder = strings.groupDescPlaceholder,
                     leadingIcon = { Icon(Icons.Default.Description, contentDescription = null, tint = VioletAccent) },
                     testTag = "group_description_input"
                 )
@@ -373,8 +373,8 @@ fun ChatsScreen(
                 CyberTextField(
                     value = groupMemberQuery,
                     onValueChange = { groupMemberQuery = it; viewModel.searchUsers(it) },
-                    label = "Find participants",
-                    placeholder = "Type username...",
+                    label = strings.addParticipantsLabel,
+                    placeholder = strings.enterUsernamePlaceholder,
                     leadingIcon = { Icon(Icons.Default.Group, contentDescription = null, tint = VioletAccent) },
                     testTag = "group_participants_input"
                 )

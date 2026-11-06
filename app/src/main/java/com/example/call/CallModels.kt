@@ -25,6 +25,29 @@ data class CallPeer(
     val avatar: String? = null
 )
 
+/** Состояние WebRTC-соединения с одним участником группового звонка. */
+enum class LinkState { CONNECTING, CONNECTED, LOST }
+
+/** Другой участник звонка (в группе их несколько): что он показывает и есть ли с ним связь. */
+data class CallMember(
+    val id: Long,
+    val username: String,
+    val avatar: String? = null,
+    val videoOn: Boolean = false,
+    val screenShare: Boolean = false,
+    val muted: Boolean = false,
+    val link: LinkState = LinkState.CONNECTING
+)
+
+/** Идущий групповой звонок в чате (кнопка «Присоединиться»). */
+data class GroupCallInfo(
+    val callId: String,
+    val chatId: Long,
+    val media: String,
+    val participants: List<Long>,
+    val maxParticipants: Int
+)
+
 data class CallUiState(
     val phase: CallPhase = CallPhase.IDLE,
     val callId: String? = null,
@@ -44,5 +67,10 @@ data class CallUiState(
     /** Время установки соединения (elapsedRealtime), для таймера. */
     val connectedAtMs: Long? = null,
     /** Код причины для экрана «Звонок завершён» (busy, rejected, timeout, ...). */
-    val endReason: String? = null
+    val endReason: String? = null,
+    /** Групповой звонок (mesh): [members] — остальные участники, [chatTitle] — название чата. */
+    val isGroup: Boolean = false,
+    val chatTitle: String = "",
+    val members: List<CallMember> = emptyList(),
+    val maxParticipants: Int = 6
 )

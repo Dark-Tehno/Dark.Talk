@@ -30,6 +30,9 @@ class PreferencesManager(context: Context) {
         private const val KEY_APP_THEME = "app_theme"
         private const val KEY_REACTION_EMOJIS = "reaction_emojis"
         private const val KEY_USER_LANGUAGE = "user_language"
+        private const val KEY_APP_FONT = "app_font"
+        private const val KEY_CUSTOM_FONT_PATH = "custom_font_path"
+        private const val KEY_CHAT_WALLPAPER_PREFIX = "chat_wallpaper_"
         const val DEFAULT_THEME = "telegram"
     }
 
@@ -37,11 +40,20 @@ class PreferencesManager(context: Context) {
     /** Реактивная тема – вместо опроса SharedPreferences каждые 300 мс. */
     val appThemeFlow: StateFlow<String> = _appThemeFlow
 
+    private val _appFontFlow = MutableStateFlow(prefs.getString(KEY_APP_FONT, "default") ?: "default")
+    val appFontFlow: StateFlow<String> = _appFontFlow
+
+    private val _customFontPathFlow = MutableStateFlow(prefs.getString(KEY_CUSTOM_FONT_PATH, null))
+    val customFontPathFlow: StateFlow<String?> = _customFontPathFlow
+
     private val _userLanguageFlow = MutableStateFlow(prefs.getString(KEY_USER_LANGUAGE, "Russian") ?: "Russian")
     val userLanguageFlow: StateFlow<String> = _userLanguageFlow
 
     private val _isLoggedInFlow = MutableStateFlow(!prefs.getString(KEY_AUTH_TOKEN, null).isNullOrBlank())
     val isLoggedInFlow: StateFlow<Boolean> = _isLoggedInFlow
+
+    private val _userIdFlow = MutableStateFlow(prefs.getLong(KEY_USER_ID, -1L))
+    val userIdFlow: StateFlow<Long> = _userIdFlow
 
     var serverDomain: String
         get() {
@@ -134,7 +146,10 @@ class PreferencesManager(context: Context) {
 
     var userId: Long
         get() = prefs.getLong(KEY_USER_ID, -1L)
-        set(value) = prefs.edit().putLong(KEY_USER_ID, value).apply()
+        set(value) {
+            prefs.edit().putLong(KEY_USER_ID, value).apply()
+            _userIdFlow.value = value
+        }
 
     var username: String?
         get() = prefs.getString(KEY_USERNAME, null)
@@ -188,6 +203,33 @@ class PreferencesManager(context: Context) {
         get() = prefs.getString(KEY_REACTION_EMOJIS, "❤️,🔥,👍,😂,😮,👏") ?: "❤️,🔥,👍,😂,😮,👏"
         set(value) = prefs.edit().putString(KEY_REACTION_EMOJIS, value.trim()).apply()
 
+    var appFont: String
+        get() = prefs.getString(KEY_APP_FONT, "default") ?: "default"
+        set(value) {
+            val v = value.trim()
+            prefs.edit().putString(KEY_APP_FONT, v).apply()
+            _appFontFlow.value = v
+        }
+
+    var customFontPath: String?
+        get() = prefs.getString(KEY_CUSTOM_FONT_PATH, null)
+        set(value) {
+            prefs.edit().putString(KEY_CUSTOM_FONT_PATH, value).apply()
+            _customFontPathFlow.value = value
+        }
+
+    fun getChatWallpaper(chatId: Long): String? {
+        return prefs.getString(KEY_CHAT_WALLPAPER_PREFIX + chatId, null)
+    }
+
+    fun setChatWallpaper(chatId: Long, path: String?) {
+        if (path.isNullOrBlank()) {
+            prefs.edit().remove(KEY_CHAT_WALLPAPER_PREFIX + chatId).apply()
+        } else {
+            prefs.edit().putString(KEY_CHAT_WALLPAPER_PREFIX + chatId, path).apply()
+        }
+    }
+
     val maxCacheSizeBytes: Long
         get() {
             val mb = maxCacheMb
@@ -204,5 +246,6 @@ class PreferencesManager(context: Context) {
             .remove(KEY_2FA_ENABLED)
             .apply()
         _isLoggedInFlow.value = false
+        _userIdFlow.value = -1L
     }
 }

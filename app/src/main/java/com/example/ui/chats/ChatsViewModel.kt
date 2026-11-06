@@ -142,14 +142,9 @@ class ChatsViewModel(private val repository: DarkTalkRepository) : ViewModel() {
                 }
             }
             is WsEvent.MessageDeleted -> {
-                _uiState.update { state ->
-                    state.copy(chats = state.chats.map { chat ->
-                        val last = chat.lastMessage
-                        if (chat.id == event.chatId && last != null && last.id == event.messageId) {
-                            chat.copy(lastMessage = last.copy(isDeleted = true, text = "", attachment = null))
-                        } else chat
-                    })
-                }
+                // последним могло быть удалённое сообщение: подтягиваем актуальный список
+                val wasLast = _uiState.value.chats.any { it.id == event.chatId && it.lastMessage?.id == event.messageId }
+                if (wasLast) loadChats(isBackground = true)
             }
             is WsEvent.MessageRead -> {
                 if (event.userId == myId) {

@@ -1,12 +1,14 @@
 package com.example.ui.chat
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.media.PlaybackParams
 import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -29,6 +31,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -54,6 +57,7 @@ import coil.request.ImageRequest
 import com.example.DarkTalkApplication
 import com.example.call.CallPeer
 import com.example.call.CallPhase
+import com.example.ui.call.GroupCallBanner
 import com.example.ui.call.describeCallMessage
 import com.example.ui.call.rememberCallPermissionRequester
 import com.example.data.model.Chat
@@ -134,7 +138,7 @@ fun ChatRoomScreen(
         else -> null
     }
 
-    // ---- звонки (только личные чаты) ----
+    // ---- звонки (личные и групповые чаты) ----
     val callManager = remember { DarkTalkApplication.instance.callManager }
     val callState by callManager.state.collectAsState()
     val requestCallPermissions = rememberCallPermissionRequester()
@@ -143,6 +147,24 @@ fun ChatRoomScreen(
         val peer = otherUser ?: return
         requestCallPermissions(video) {
             callManager.startCall(viewModel.chatId, CallPeer(peer.id, peer.username, peer.avatar), video)
+        }
+    }
+
+    // ---- групповые звонки (mesh, до 6 человек) ----
+    val groupCalls by callManager.groupCalls.collectAsState()
+    val groupCall = groupCalls[viewModel.chatId]
+    val chatPeers = chat?.participants?.mapNotNull { it.user }?.map { CallPeer(it.id, it.username, it.avatar) }.orEmpty()
+    LaunchedEffect(viewModel.chatId, isGroup) {
+        if (isGroup) callManager.refreshGroupCall(viewModel.chatId)
+    }
+    fun startGroupCall(video: Boolean) {
+        requestCallPermissions(video) {
+            callManager.startGroupCall(viewModel.chatId, headerTitle, video, chatPeers)
+        }
+    }
+    fun joinGroupCall() {
+        requestCallPermissions(groupCall?.media == "video") {
+            callManager.joinGroupCall(viewModel.chatId, headerTitle, chatPeers)
         }
     }
 
@@ -217,6 +239,8 @@ fun ChatRoomScreen(
         }
     }
 
+    var showAttachmentOptions by remember { mutableStateOf(false) }
+
     val photoPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
@@ -225,11 +249,67 @@ fun ChatRoomScreen(
                     val bytes = withContext(Dispatchers.IO) {
                         context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                     }
-                    val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: "jpg"
-                    if (bytes != null) viewModel.sendAttachment(bytes, "img_${System.currentTimeMillis()}.$ext", mime)
+                    var fileName = getFileNameFromUri(context, uri)
+                    if (fileName.isNullOrBlank()) {
+                        val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: "jpg"
+                        fileName = "img_${System.currentTimeMillis()}.$ext"
+                    }
+                    if (bytes != null) {
+                        viewModel.sendAttachment(
+                            bytes = bytes,
+                            fileName = fileName,
+                            mimeType = mime,
+                            overrideMessageType = if (mime.startsWith("image/")) "image" else "file"
+                        )
+                    }
                 }
             }
         }
+    }
+
+    val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                runCatching {
+                    val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
+                    val bytes = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    }
+                    var fileName = getFileNameFromUri(context, uri)
+                    if (fileName.isNullOrBlank()) {
+                        val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: "bin"
+                        fileName = "file_${System.currentTimeMillis()}.$ext"
+                    }
+                    if (bytes != null) {
+                        val isImage = mime.startsWith("image/")
+                        viewModel.sendAttachment(
+                            bytes = bytes,
+                            fileName = fileName,
+                            mimeType = mime,
+                            overrideMessageType = if (isImage) "image" else "file"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    val wallpaperPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
+        uri?.let { viewModel.setChatWallpaper(context, it) }
+    }
+
+    if (showAttachmentOptions) {
+        AttachmentTypeSelectorDialog(
+            onDismiss = { showAttachmentOptions = false },
+            onSelectPhoto = {
+                showAttachmentOptions = false
+                photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+            },
+            onSelectFile = {
+                showAttachmentOptions = false
+                filePickerLauncher.launch("*/*")
+            }
+        )
     }
 
     // ---- эффекты ----
@@ -320,6 +400,15 @@ fun ChatRoomScreen(
                     )
                 },
                 actions = {
+                    if (isGroup && chat != null) {
+                        val idleGroup = callState.phase == CallPhase.IDLE
+                        IconButton(onClick = { startGroupCall(false) }, enabled = idleGroup) {
+                            Icon(Icons.Default.Call, contentDescription = "Group voice call", tint = accent)
+                        }
+                        IconButton(onClick = { startGroupCall(true) }, enabled = idleGroup) {
+                            Icon(Icons.Default.Videocam, contentDescription = "Group video call", tint = accent)
+                        }
+                    }
                     if (!isGroup && otherUser != null) {
                         val idle = callState.phase == CallPhase.IDLE
                         IconButton(onClick = { startCall(false) }, enabled = idle) {
@@ -347,7 +436,31 @@ fun ChatRoomScreen(
                 .padding(padding)
                 .imePadding()
         ) {
+            if (isGroup && groupCall != null && (callState.phase == CallPhase.IDLE || callState.phase == CallPhase.ENDED)) {
+                GroupCallBanner(
+                    info = groupCall,
+                    names = groupCall.participants.mapNotNull { id -> chatPeers.firstOrNull { it.id == id }?.username },
+                    onJoin = { joinGroupCall() }
+                )
+            }
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                if (!uiState.chatWallpaper.isNullOrBlank()) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(uiState.chatWallpaper)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = "Chat Wallpaper",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().alpha(0.85f)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.45f))
+                    )
+                }
+
                 when {
                     uiState.isLoading && uiState.messages.isEmpty() -> {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -506,9 +619,7 @@ fun ChatRoomScreen(
                             verticalAlignment = Alignment.Bottom
                         ) {
                             IconButton(
-                                onClick = {
-                                    photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                                },
+                                onClick = { showAttachmentOptions = true },
                                 modifier = Modifier.testTag("attach_button")
                             ) {
                                 Icon(Icons.Default.AttachFile, contentDescription = "Send attachment", tint = TextSecondary)
@@ -657,6 +768,11 @@ fun ChatRoomScreen(
                 chat = uiState.chat,
                 otherUserProfile = uiState.otherUserProfile,
                 currentUserId = myId,
+                hasWallpaper = !uiState.chatWallpaper.isNullOrBlank(),
+                onPickWallpaper = {
+                    wallpaperPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                },
+                onRemoveWallpaper = { viewModel.removeChatWallpaper() },
                 onDismiss = { isChatInfoOpen = false },
                 onAddMembersClick = {
                     isChatInfoOpen = false
@@ -805,6 +921,9 @@ fun ChatInfoModalBottomSheet(
     chat: Chat?,
     otherUserProfile: User?,
     currentUserId: Long,
+    hasWallpaper: Boolean = false,
+    onPickWallpaper: () -> Unit = {},
+    onRemoveWallpaper: () -> Unit = {},
     onDismiss: () -> Unit,
     onAddMembersClick: () -> Unit,
     onRemoveParticipant: (Long) -> Unit,
@@ -851,6 +970,51 @@ fun ChatInfoModalBottomSheet(
             }
 
             Spacer(Modifier.height(20.dp))
+
+            // Chat Theme & Wallpaper Card
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .glass(RoundedCornerShape(18.dp), strength = 0.7f)
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = "Chat Wallpaper",
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Set a custom background photo for this chat.",
+                    color = TextSecondary,
+                    fontSize = 12.sp
+                )
+                Spacer(Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CyberButton(
+                        text = "🖼️ Change Wallpaper",
+                        onClick = onPickWallpaper,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (hasWallpaper) {
+                        OutlinedButton(
+                            onClick = onRemoveWallpaper,
+                            border = BorderStroke(1.dp, CrimsonError.copy(alpha = 0.5f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = CrimsonError),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Reset", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
 
             if (!isGroup && otherUser != null) {
                 Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(18.dp), strength = 0.7f).padding(16.dp)) {
@@ -1071,6 +1235,7 @@ fun MessageBubble(
             .then(if (isHighlighted) Modifier.border(2.dp, accent, shape) else Modifier)
     }
     val contentTint = if (isOwn) Color.White else accent
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1114,6 +1279,22 @@ fun MessageBubble(
                     }
                 }
 
+                if (replyMessage == null && message.replyDeleted) {
+                    // как в Telegram: цитата удалённого сообщения, нажатие никуда не ведёт
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 6.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black.copy(alpha = 0.18f))
+                            .padding(6.dp)
+                    ) {
+                        Box(Modifier.width(3.dp).height(20.dp).background(contentTint.copy(alpha = 0.5f), CircleShape))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Deleted message", color = Color.White.copy(alpha = 0.6f), fontStyle = FontStyle.Italic, fontSize = 12.sp, maxLines = 1)
+                    }
+                }
+
                 if (!message.isDeleted && !message.attachment.isNullOrBlank()) {
                     if (message.messageType == "voice_message") {
                         VoiceMessagePlayer(
@@ -1139,14 +1320,55 @@ fun MessageBubble(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color.Black.copy(alpha = 0.18f))
-                                .padding(8.dp),
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.Black.copy(alpha = 0.22f))
+                                .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)), RoundedCornerShape(12.dp))
+                                .clickable {
+                                    message.attachment?.let { rawUrl ->
+                                        viewModel.openFile(context, rawUrl, message.attachmentName ?: "file", message.id)
+                                    }
+                                }
+                                .padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.InsertDriveFile, "File", tint = contentTint)
-                            Spacer(Modifier.width(8.dp))
-                            Text(message.attachmentName ?: "File", color = TextPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(contentTint.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.InsertDriveFile,
+                                    contentDescription = "File",
+                                    tint = contentTint,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = message.attachmentName ?: "File",
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                val sizeText = remember(message.attachmentSize) { formatFileSize(message.attachmentSize) }
+                                Text(
+                                    text = if (sizeText.isNotBlank()) "$sizeText • Tap to open" else "Tap to open",
+                                    color = TextSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = "Download/Open",
+                                tint = contentTint,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                         Spacer(Modifier.height(4.dp))
                     }
@@ -1366,4 +1588,125 @@ fun VoiceMessagePlayer(
             modifier = Modifier.padding(start = 44.dp)
         )
     }
+}
+
+private fun getFileNameFromUri(context: Context, uri: Uri): String? {
+    var name: String? = null
+    if (uri.scheme == "content") {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0) {
+                    name = cursor.getString(index)
+                }
+            }
+        }
+    }
+    if (name.isNullOrBlank()) {
+        name = uri.lastPathSegment?.substringAfterLast('/')
+    }
+    return name
+}
+
+private fun formatFileSize(bytes: Long?): String {
+    if (bytes == null || bytes <= 0) return ""
+    val kb = bytes / 1024.0
+    val mb = kb / 1024.0
+    val gb = mb / 1024.0
+    return when {
+        gb >= 1.0 -> String.format(Locale.US, "%.1f GB", gb)
+        mb >= 1.0 -> String.format(Locale.US, "%.1f MB", mb)
+        kb >= 1.0 -> String.format(Locale.US, "%.0f KB", kb)
+        else -> "$bytes B"
+    }
+}
+
+@Composable
+private fun AttachmentTypeSelectorDialog(
+    onDismiss: () -> Unit,
+    onSelectPhoto: () -> Unit,
+    onSelectFile: () -> Unit
+) {
+    val strings = LocalAppStrings.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DarkSurface,
+        titleContentColor = TextPrimary,
+        title = {
+            Text(
+                text = strings.sendAttachmentTitle,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color.White.copy(alpha = 0.06f),
+                    border = BorderStroke(1.dp, BubbleBorder),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectPhoto() }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(CyanAccent.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Image, contentDescription = null, tint = CyanAccent)
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(strings.photoOrVideoOption, color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text(strings.photoOrVideoDesc, color = TextSecondary, fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color.White.copy(alpha = 0.06f),
+                    border = BorderStroke(1.dp, BubbleBorder),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectFile() }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(EmeraldSuccess.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, tint = EmeraldSuccess)
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(strings.fileOrDocumentOption, color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text(strings.fileOrDocumentDesc, color = TextSecondary, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(strings.cancel, color = TextMuted)
+            }
+        }
+    )
 }

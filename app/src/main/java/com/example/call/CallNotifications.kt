@@ -72,11 +72,12 @@ object CallNotifications {
     fun showIncoming(context: Context, state: CallUiState, language: String) {
         if (!canNotify(context)) return
         val en = isEnglishLanguage(language)
-        val name = state.peer?.username ?: "?"
-        val text = if (state.isVideoCall) {
-            if (en) "Incoming video call" else "Входящий видеозвонок"
-        } else {
-            if (en) "Incoming call" else "Входящий звонок"
+        val name = if (state.isGroup) state.chatTitle.ifBlank { if (en) "Group call" else "Групповой звонок" } else state.peer?.username ?: "?"
+        val text = when {
+            state.isGroup && state.isVideoCall -> if (en) "Incoming group video call" else "Входящий групповой видеозвонок"
+            state.isGroup -> if (en) "Incoming group call" else "Входящий групповой звонок"
+            state.isVideoCall -> if (en) "Incoming video call" else "Входящий видеозвонок"
+            else -> if (en) "Incoming call" else "Входящий звонок"
         }
         val notification = NotificationCompat.Builder(context, CHANNEL_INCOMING)
             .setSmallIcon(R.mipmap.ic_launcher)
@@ -109,7 +110,7 @@ object CallNotifications {
     /** Уведомление для foreground-сервиса идущего звонка. */
     fun ongoing(context: Context, state: CallUiState, language: String): Notification {
         val en = isEnglishLanguage(language)
-        val name = state.peer?.username ?: "?"
+        val name = if (state.isGroup) state.chatTitle.ifBlank { if (en) "Group call" else "Групповой звонок" } else state.peer?.username ?: "?"
         val builder = NotificationCompat.Builder(context, CHANNEL_ONGOING)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(name)

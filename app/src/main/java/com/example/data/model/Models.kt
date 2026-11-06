@@ -180,6 +180,8 @@ data class Message(
     @Json(name = "chat_id") val chatId: Long,
     @Json(name = "sender") val sender: User? = null,
     @Json(name = "reply_to") val replyTo: Long? = null,
+    /** Сообщение, на которое отвечали, удалено (replyTo при этом null). */
+    @Json(name = "reply_deleted") val replyDeleted: Boolean = false,
     @Json(name = "message_type") val messageType: String = "text", // "text", "image", "file", "voice_message", "system"
     @Json(name = "text") val text: String? = null,
     @Json(name = "attachment") val attachment: String? = null,
@@ -287,4 +289,16 @@ data class IceServersResponse(
     @Json(name = "status") val status: String? = null,
     @Json(name = "ice_servers") val iceServers: List<IceServerDto> = emptyList(),
     @Json(name = "ttl") val ttl: Int? = null
+)
+
+
+/** GET call/api/active/?chat_id= : идёт ли групповой звонок в чате. */
+@JsonClass(generateAdapter = true)
+data class ActiveCallResponse(
+    @Json(name = "active") val active: Boolean = false,
+    @Json(name = "call_id") val callId: String? = null,
+    @Json(name = "chat_id") val chatId: Long? = null,
+    @Json(name = "media") val media: String? = null,
+    @Json(name = "participants") val participants: List<Long> = emptyList(),
+    @Json(name = "max_participants") val maxParticipants: Int? = null
 )

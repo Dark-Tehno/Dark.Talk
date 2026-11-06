@@ -1239,6 +1239,7 @@ fun PersonalizationTabContent(
     uiState: SettingsUiState,
     viewModel: SettingsViewModel
 ) {
+    val context = LocalContext.current
     var reactionInput by remember(uiState.customReactionEmojisInput) {
         mutableStateOf(uiState.customReactionEmojisInput)
     }
@@ -1334,6 +1335,177 @@ fun PersonalizationTabContent(
                         )
                     }
                 }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = "App Typography & Fonts",
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Choose system font presets, upload custom .ttf/.otf font files, or download fonts from the web.",
+            style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        val fontPresets = listOf(
+            "default" to "System Default",
+            "sans_serif" to "Sans-Serif",
+            "serif" to "Serif",
+            "monospace" to "Monospace",
+            "cursive" to "Cursive",
+            "custom" to "Custom Font (.ttf / .otf)"
+        )
+
+        val fontPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+            uri?.let { viewModel.setCustomFontFromFile(context, it) }
+        }
+        var fontUrlInput by remember { mutableStateOf("") }
+
+        AnimatedVisibility(visible = !uiState.fontMessage.isNullOrBlank()) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = CyanAccentContainer,
+                border = BorderStroke(1.dp, CyanAccent),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = CyanAccent)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = uiState.fontMessage.orEmpty(),
+                        color = TextPrimary,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = { viewModel.clearFontNotice() }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextMuted)
+                    }
+                }
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            fontPresets.forEach { (key, label) ->
+                val isSelected = uiState.appFont == key
+
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isSelected) DarkSurfaceElevated else DarkSurface,
+                    border = BorderStroke(1.dp, if (isSelected) CyanAccent else BubbleBorder),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.onAppFontChanged(key) }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = TextPrimary
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+                        RadioButton(
+                            selected = isSelected,
+                            onClick = { viewModel.onAppFontChanged(key) },
+                            colors = RadioButtonDefaults.colors(selectedColor = CyanAccent)
+                        )
+                    }
+                }
+            }
+        }
+
+        if (uiState.appFont == "custom") {
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = DarkSurface,
+                border = BorderStroke(1.dp, BubbleBorder),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Install Custom Font",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    CyberButton(
+                        text = "📂 Select Font File (.ttf / .otf)",
+                        onClick = { fontPickerLauncher.launch("*/*") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    HorizontalDivider(color = BubbleBorder)
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "Or Download Font from Web URL",
+                        style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    CyberTextField(
+                        value = fontUrlInput,
+                        onValueChange = { fontUrlInput = it },
+                        label = "Font Web URL",
+                        placeholder = "https://example.com/font.ttf",
+                        leadingIcon = { Icon(Icons.Default.Download, contentDescription = null, tint = CyanAccent) }
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    CyberButton(
+                        text = if (uiState.isFontLoading) "Downloading Font..." else "Download & Apply Font",
+                        enabled = fontUrlInput.isNotBlank() && !uiState.isFontLoading,
+                        onClick = { viewModel.downloadFontFromUrl(fontUrlInput) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Live Font Preview
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = DarkSurfaceElevated,
+            border = BorderStroke(1.dp, CyanAccent.copy(alpha = 0.5f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "Font Preview:",
+                    style = MaterialTheme.typography.labelSmall.copy(color = CyanAccent)
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "The quick brown fox jumps over the lazy dog.",
+                    style = MaterialTheme.typography.bodyMedium.copy(color = TextPrimary)
+                )
+                Text(
+                    text = "Съешь ещё этих мягких французских булок, да выпей чаю.",
+                    style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary)
+                )
             }
         }
 

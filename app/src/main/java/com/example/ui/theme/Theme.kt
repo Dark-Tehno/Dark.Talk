@@ -13,9 +13,13 @@ val LocalAppThemeColors = staticCompositionLocalOf { TelegramThemeColors }
 @Composable
 fun DarkTalkTheme(
     themeName: String = "telegram",
+    fontType: String = "default",
+    customFontPath: String? = null,
     content: @Composable () -> Unit
 ) {
     val themeColors = remember(themeName) { getThemeColors(themeName) }
+    val fontFamily = remember(fontType, customFontPath) { getAppFontFamily(fontType, customFontPath) }
+    val typography = remember(fontFamily) { createAppTypography(fontFamily) }
 
     val scheme = darkColorScheme(
         primary = themeColors.primary,
@@ -42,7 +46,7 @@ fun DarkTalkTheme(
     CompositionLocalProvider(LocalAppThemeColors provides themeColors) {
         MaterialTheme(
             colorScheme = scheme,
-            typography = Typography,
+            typography = typography,
             content = content
         )
     }

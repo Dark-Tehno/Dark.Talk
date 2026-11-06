@@ -34,6 +34,7 @@ import com.example.R
 import com.example.ui.components.CyberButton
 import com.example.ui.components.CyberTextField
 import com.example.ui.theme.*
+import com.example.util.LocalAppStrings
 
 @Composable
 fun AuthScreen(
@@ -42,6 +43,7 @@ fun AuthScreen(
     onNavigateToSettings: () -> Unit,
     onAuthSuccess: () -> Unit
 ) {
+    val strings = LocalAppStrings.current
     val uiState by viewModel.uiState.collectAsState()
     var isRegisterMode by remember { mutableStateOf(false) }
 
@@ -123,7 +125,7 @@ fun AuthScreen(
                     )
                 )
                 Text(
-                    text = "Secure Real-time Messaging",
+                    text = strings.authSubtitle,
                     style = MaterialTheme.typography.bodyMedium.copy(
                         color = CyanAccentMuted,
                         fontSize = 13.sp
@@ -153,7 +155,7 @@ fun AuthScreen(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Server: $serverDomain",
+                            text = "${strings.networkTab}: $serverDomain",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = TextSecondary,
                                 fontSize = 11.sp
@@ -199,7 +201,7 @@ fun AuthScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "Sign In",
+                                text = strings.signInTab,
                                 style = MaterialTheme.typography.labelLarge.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = if (!isRegisterMode) Color(0xFF001F28) else TextSecondary
@@ -221,7 +223,7 @@ fun AuthScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "Register",
+                                text = strings.registerTab,
                                 style = MaterialTheme.typography.labelLarge.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = if (isRegisterMode) Color(0xFF001F28) else TextSecondary
@@ -269,11 +271,11 @@ fun AuthScreen(
                     CyberTextField(
                         value = loginUsername,
                         onValueChange = { loginUsername = it },
-                        label = "Username",
+                        label = strings.usernameOrEmailLabel,
                         leadingIcon = {
                             Icon(Icons.Default.Person, contentDescription = null, tint = CyanAccent)
                         },
-                        placeholder = "Enter your username",
+                        placeholder = strings.usernameOrEmailLabel,
                         testTag = "login_username_input"
                     )
 
@@ -282,7 +284,7 @@ fun AuthScreen(
                     CyberTextField(
                         value = loginPassword,
                         onValueChange = { loginPassword = it },
-                        label = "Password",
+                        label = strings.passwordLabel,
                         visualTransformation = if (showLoginPassword) VisualTransformation.None else PasswordVisualTransformation(),
                         leadingIcon = {
                             Icon(Icons.Default.Lock, contentDescription = null, tint = CyanAccent)
@@ -297,14 +299,14 @@ fun AuthScreen(
                             }
                         },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        placeholder = "Enter secret password",
+                        placeholder = strings.passwordLabel,
                         testTag = "login_password_input"
                     )
 
                     Spacer(modifier = Modifier.height(24.dp))
 
                     CyberButton(
-                        text = "Sign In",
+                        text = strings.signInButton,
                         onClick = { viewModel.login(loginUsername, loginPassword) },
                         isLoading = uiState.isLoading,
                         modifier = Modifier.fillMaxWidth(),
@@ -315,7 +317,7 @@ fun AuthScreen(
                     CyberTextField(
                         value = regEmail,
                         onValueChange = { regEmail = it },
-                        label = "Email Address *",
+                        label = "${strings.emailLabel} *",
                         leadingIcon = {
                             Icon(Icons.Default.Email, contentDescription = null, tint = CyanAccent)
                         },
@@ -329,7 +331,7 @@ fun AuthScreen(
                     CyberTextField(
                         value = regPassword,
                         onValueChange = { regPassword = it },
-                        label = "Password *",
+                        label = "${strings.passwordLabel} *",
                         visualTransformation = if (showRegPassword) VisualTransformation.None else PasswordVisualTransformation(),
                         leadingIcon = {
                             Icon(Icons.Default.Lock, contentDescription = null, tint = CyanAccent)
@@ -344,7 +346,7 @@ fun AuthScreen(
                             }
                         },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        placeholder = "Create strong password",
+                        placeholder = strings.passwordLabel,
                         testTag = "register_password_input"
                     )
 
@@ -353,11 +355,11 @@ fun AuthScreen(
                     CyberTextField(
                         value = regUsername,
                         onValueChange = { regUsername = it },
-                        label = "Username (Optional)",
+                        label = strings.usernameLabel,
                         leadingIcon = {
                             Icon(Icons.Default.AlternateEmail, contentDescription = null, tint = CyanAccent)
                         },
-                        placeholder = "Leave empty to use email prefix",
+                        placeholder = strings.usernameLabel,
                         testTag = "register_username_input"
                     )
 
@@ -369,14 +371,14 @@ fun AuthScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Language:",
+                            text = "${strings.languageLabel}:",
                             style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary),
                             modifier = Modifier.padding(end = 12.dp)
                         )
                         FilterChip(
                             selected = regLanguage == "Russian",
                             onClick = { regLanguage = "Russian" },
-                            label = { Text("Russian") },
+                            label = { Text("Русский") },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = CyanAccentContainer,
                                 selectedLabelColor = CyanAccent
@@ -399,18 +401,18 @@ fun AuthScreen(
                     CyberTextField(
                         value = regDob,
                         onValueChange = { regDob = it },
-                        label = "Date of Birth (Optional)",
+                        label = strings.dobLabel,
                         leadingIcon = {
                             Icon(Icons.Default.CalendarToday, contentDescription = null, tint = CyanAccent)
                         },
-                        placeholder = "YYYY-MM-DD (e.g. 2000-01-31)",
+                        placeholder = "YYYY-MM-DD",
                         testTag = "register_dob_input"
                     )
 
                     Spacer(modifier = Modifier.height(24.dp))
 
                     CyberButton(
-                        text = "Create Account",
+                        text = strings.createAccountButton,
                         onClick = {
                             viewModel.register(regEmail, regPassword, regUsername, regLanguage, regDob)
                         },
@@ -456,7 +458,7 @@ fun AuthScreen(
                             Spacer(modifier = Modifier.height(16.dp))
 
                             Text(
-                                text = "Two-Factor Auth",
+                                text = strings.twoFaTitle,
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
@@ -466,7 +468,7 @@ fun AuthScreen(
                             Spacer(modifier = Modifier.height(8.dp))
 
                             Text(
-                                text = "A 6-digit confirmation code was sent to your registered email address.",
+                                text = strings.twoFaSubtitle,
                                 style = MaterialTheme.typography.bodyMedium.copy(
                                     color = TextSecondary,
                                     textAlign = TextAlign.Center
@@ -478,7 +480,7 @@ fun AuthScreen(
                             CyberTextField(
                                 value = twoFaCode,
                                 onValueChange = { if (it.length <= 6) twoFaCode = it },
-                                label = "Verification Code",
+                                label = strings.enterTwoFaCode,
                                 placeholder = "123456",
                                 leadingIcon = {
                                     Icon(Icons.Default.Key, contentDescription = null, tint = CyanAccent)
@@ -490,7 +492,7 @@ fun AuthScreen(
                             Spacer(modifier = Modifier.height(20.dp))
 
                             CyberButton(
-                                text = "Verify & Sign In",
+                                text = strings.verifyAndSignInButton,
                                 onClick = { viewModel.verify2Fa(twoFaCode) },
                                 isLoading = uiState.isLoading,
                                 modifier = Modifier.fillMaxWidth(),
@@ -507,14 +509,14 @@ fun AuthScreen(
                                     onClick = { viewModel.resend2Fa() },
                                     modifier = Modifier.testTag("2fa_resend_button")
                                 ) {
-                                    Text("Resend Code", color = CyanAccent)
+                                    Text(strings.resendCodeButton, color = CyanAccent)
                                 }
 
                                 TextButton(
                                     onClick = { viewModel.cancel2Fa() },
                                     modifier = Modifier.testTag("2fa_cancel_button")
                                 ) {
-                                    Text("Cancel", color = TextSecondary)
+                                    Text(strings.cancel, color = TextSecondary)
                                 }
                             }
                         }

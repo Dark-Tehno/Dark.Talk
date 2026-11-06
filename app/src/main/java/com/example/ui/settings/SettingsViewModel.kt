@@ -1,19 +1,24 @@
 package com.example.ui.settings
 
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.DarkTalkApplication
 import com.example.data.model.Device
 import com.example.data.model.LoginHistoryItem
 import com.example.data.model.User
 import com.example.data.repository.DarkTalkRepository
 import com.example.data.repository.Resource
+import com.example.util.MediaUrlUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.Request
 import java.util.Locale
 
 data class MediaItem(
@@ -72,6 +77,10 @@ data class SettingsUiState(
     val cacheClearedMessage: String? = null,
     // Personalization tab
     val appTheme: String = "cyber",
+    val appFont: String = "default",
+    val customFontPath: String? = null,
+    val fontMessage: String? = null,
+    val isFontLoading: Boolean = false,
     val customReactionEmojisInput: String = "❤️,🔥,👍,😂,😮,👏",
     val personalizationSavedNotice: String? = null,
     // Common
@@ -92,6 +101,8 @@ class SettingsViewModel(private val repository: DarkTalkRepository) : ViewModel(
             maxCacheMb = prefs.maxCacheMb,
             customCacheGbInput = prefs.customCacheGb,
             appTheme = prefs.appTheme,
+            appFont = prefs.appFont,
+            customFontPath = prefs.customFontPath,
             customReactionEmojisInput = prefs.customReactionEmojis
         )
     )
@@ -535,5 +546,91 @@ class SettingsViewModel(private val repository: DarkTalkRepository) : ViewModel(
 
     fun clearNetworkNotice() {
         _uiState.update { it.copy(isNetworkSaved = false, errorMessage = null) }
+    }
+
+    // Font Customization
+    fun onAppFontChanged(fontType: String) {
+        prefs.appFont = fontType
+        _uiState.update { it.copy(appFont = fontType, fontMessage = null) }
+    }
+
+    fun setCustomFontFromFile(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isFontLoading = true, fontMessage = null) }
+            runCatching {
+                val bytes = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                }
+                if (bytes != null && bytes.size > 100) {
+                    val fontDir = DarkTalkApplication.instance.cacheDir.resolve("fonts_cache")
+                    fontDir.mkdirs()
+                    val fontFile = fontDir.resolve("custom_font.ttf")
+                    withContext(Dispatchers.IO) {
+                        fontFile.writeBytes(bytes)
+                    }
+                    prefs.customFontPath = fontFile.absolutePath
+                    prefs.appFont = "custom"
+                    _uiState.update {
+                        it.copy(
+                            appFont = "custom",
+                            customFontPath = fontFile.absolutePath,
+                            isFontLoading = false,
+                            fontMessage = "Custom font successfully loaded and applied!"
+                        )
+                    }
+                } else {
+                    _uiState.update { it.copy(isFontLoading = false, fontMessage = "Invalid font file") }
+                }
+            }.onFailure { e ->
+                _uiState.update { it.copy(isFontLoading = false, fontMessage = "Error installing font: ${e.localizedMessage}") }
+            }
+        }
+    }
+
+    fun downloadFontFromUrl(url: String) {
+        val trimmedUrl = url.trim()
+        if (trimmedUrl.isBlank()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isFontLoading = true, fontMessage = null) }
+            runCatching {
+                val resolvedUrl = MediaUrlUtils.resolveUrl(trimmedUrl) ?: trimmedUrl
+                val request = Request.Builder().url(resolvedUrl).build()
+                val response = withContext(Dispatchers.IO) {
+                    DarkTalkApplication.instance.networkClient.okHttpClient.newCall(request).execute()
+                }
+                val body = response.body
+                if (response.isSuccessful && body != null) {
+                    val bytes = withContext(Dispatchers.IO) { body.bytes() }
+                    if (bytes.size > 100) {
+                        val fontDir = DarkTalkApplication.instance.cacheDir.resolve("fonts_cache")
+                        fontDir.mkdirs()
+                        val fontFile = fontDir.resolve("custom_font.ttf")
+                        withContext(Dispatchers.IO) {
+                            fontFile.writeBytes(bytes)
+                        }
+                        prefs.customFontPath = fontFile.absolutePath
+                        prefs.appFont = "custom"
+                        _uiState.update {
+                            it.copy(
+                                appFont = "custom",
+                                customFontPath = fontFile.absolutePath,
+                                isFontLoading = false,
+                                fontMessage = "Font downloaded and applied successfully!"
+                            )
+                        }
+                    } else {
+                        _uiState.update { it.copy(isFontLoading = false, fontMessage = "Downloaded file is not a valid font") }
+                    }
+                } else {
+                    _uiState.update { it.copy(isFontLoading = false, fontMessage = "Failed to download font (HTTP ${response.code})") }
+                }
+            }.onFailure { e ->
+                _uiState.update { it.copy(isFontLoading = false, fontMessage = "Error downloading font: ${e.localizedMessage}") }
+            }
+        }
+    }
+
+    fun clearFontNotice() {
+        _uiState.update { it.copy(fontMessage = null) }
     }
 }

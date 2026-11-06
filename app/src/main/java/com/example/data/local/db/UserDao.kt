@@ -8,12 +8,6 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface UserDao {
-    @Query("SELECT * FROM users LIMIT 1")
-    fun getUser(): Flow<UserEntity?>
-
-    @Query("SELECT * FROM users LIMIT 1")
-    suspend fun getUserSync(): UserEntity?
-
     @Query("SELECT * FROM users WHERE id = :userId LIMIT 1")
     fun getUserById(userId: Long): Flow<UserEntity?>
 

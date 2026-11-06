@@ -46,7 +46,7 @@ fun ProfileScreen(
         containerColor = DarkBackground,
         topBar = {
             DarkTalkTopBar(
-                title = "Profile & Security",
+                title = strings.profileTitle,
                 onBackClick = onBackClick
             )
         }
@@ -99,7 +99,7 @@ fun ProfileScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     val user = uiState.user
-                    val displayName = user?.username ?: "User"
+                    val displayName = user?.username ?: strings.userFallback
 
                     AvatarView(
                         avatarUrl = user?.avatar,
@@ -131,9 +131,9 @@ fun ProfileScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        InfoPill(label = "User ID", value = "#${user?.id ?: "-"}")
+                        InfoPill(label = strings.userIdLabel, value = "#${user?.id ?: "-"}")
                         InfoPill(label = strings.languageLabel, value = user?.language ?: "Russian")
-                        InfoPill(label = "Status", value = if (user?.isOnline == true) "Online" else "Active")
+                        InfoPill(label = "Статус", value = if (user?.isOnline == true) strings.onlineStatus else strings.offlineStatus)
                     }
                 }
             }
@@ -142,7 +142,7 @@ fun ProfileScreen(
 
             // Security & 2FA Section
             Text(
-                text = "Security Settings",
+                text = strings.securityTab,
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
@@ -181,14 +181,14 @@ fun ProfileScreen(
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Two-Factor Authentication (2FA)",
+                            text = strings.twoFactorTitle,
                             style = MaterialTheme.typography.titleSmall.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
                         )
                         Text(
-                            text = if (uiState.twoFactorEnabled) "Enabled — code is sent on login" else "Disabled — login with password only",
+                            text = strings.twoFactorDesc,
                             style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
                         )
                     }

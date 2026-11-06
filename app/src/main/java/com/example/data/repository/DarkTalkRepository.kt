@@ -17,9 +17,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -62,7 +65,7 @@ class DarkTalkRepository(
                         database.messageDao().insertMessage(MessageEntity.fromDomain(event.message))
                     }
                     is WsEvent.MessageDeleted -> {
-                        database.messageDao().markMessageDeleted(event.messageId)
+                        database.messageDao().deleteMessageById(event.messageId)
                     }
                     else -> {}
                 }
@@ -79,7 +82,14 @@ class DarkTalkRepository(
     val roomConnectionState: StateFlow<WsConnectionState> = webSocketManager.roomConnectionState
 
     // Room persistent flows
-    val cachedUser: Flow<User?> = database.userDao().getUser().map { it?.toDomain() }
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val cachedUser: Flow<User?> = preferencesManager.userIdFlow.flatMapLatest { curUserId ->
+        if (curUserId <= 0L) {
+            flowOf(null)
+        } else {
+            database.userDao().getUserById(curUserId).map { it?.toDomain() }
+        }
+    }
     val cachedChats: Flow<List<Chat>> = database.chatDao().getAllChats().map { list -> list.map { it.toDomain() } }
 
     fun getCachedMessages(chatId: Long): Flow<List<Message>> {
@@ -237,6 +247,16 @@ class DarkTalkRepository(
         }
     }
 
+    /** Идущий групповой звонок в чате или null (нет звонка / нет сети). */
+    suspend fun getActiveCall(chatId: Long): ActiveCallResponse? {
+        return try {
+            val response = api.getActiveCall(chatId)
+            if (response.isSuccessful) response.body() else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     suspend fun getProfile(): Resource<User> {
         return try {
             val response = api.getProfile()
@@ -250,7 +270,8 @@ class DarkTalkRepository(
                 database.userDao().insertUser(UserEntity.fromDomain(user))
                 Resource.Success(user)
             } else {
-                val cached = database.userDao().getUserSync()
+                val curId = preferencesManager.userId
+                val cached = if (curId > 0L) database.userDao().getUserByIdSync(curId) else null
                 if (cached != null) {
                     Resource.Success(cached.toDomain())
                 } else {
@@ -258,7 +279,8 @@ class DarkTalkRepository(
                 }
             }
         } catch (e: Exception) {
-            val cached = database.userDao().getUserSync()
+            val curId = preferencesManager.userId
+            val cached = if (curId > 0L) database.userDao().getUserByIdSync(curId) else null
             if (cached != null) {
                 Resource.Success(cached.toDomain())
             } else {
@@ -364,7 +386,8 @@ class DarkTalkRepository(
             if (response.isSuccessful && response.body() != null) {
                 val enabled = response.body()!!.twoFactorEnabled
                 preferencesManager.twoFactorEnabled = enabled
-                val cached = database.userDao().getUserSync()
+                val curId = preferencesManager.userId
+                val cached = if (curId > 0L) database.userDao().getUserByIdSync(curId) else null
                 if (cached != null) {
                     database.userDao().insertUser(cached.copy(twoFactorEnabled = enabled))
                 }
@@ -383,7 +406,8 @@ class DarkTalkRepository(
             if (response.isSuccessful && response.body() != null) {
                 val result = response.body()!!.twoFactorEnabled
                 preferencesManager.twoFactorEnabled = result
-                val cached = database.userDao().getUserSync()
+                val curId = preferencesManager.userId
+                val cached = if (curId > 0L) database.userDao().getUserByIdSync(curId) else null
                 if (cached != null) {
                     database.userDao().insertUser(cached.copy(twoFactorEnabled = result))
                 }
@@ -755,7 +779,7 @@ class DarkTalkRepository(
         return try {
             val response = api.deleteMessage(messageId)
             if (response.isSuccessful) {
-                database.messageDao().markMessageDeleted(messageId)
+                database.messageDao().deleteMessageById(messageId)
                 Resource.Success(Unit)
             } else {
                 Resource.Error(parseServerError(response.errorBody()?.string()) ?: "Failed to delete message: ${response.code()}")

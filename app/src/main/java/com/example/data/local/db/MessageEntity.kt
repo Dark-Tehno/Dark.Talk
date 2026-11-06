@@ -28,7 +28,8 @@ data class MessageEntity(
     val createdAt: String?,
     val clientMessageId: String?,
     val isRead: Boolean,
-    val reactionsRaw: String? = null
+    val reactionsRaw: String? = null,
+    val replyDeleted: Boolean = false
 ) {
     fun toDomain(): Message {
         val parsedReactions = reactionsRaw?.split(";")?.filter { it.isNotBlank() }?.mapNotNull { item ->
@@ -47,6 +48,7 @@ data class MessageEntity(
                 User(id = it, username = senderUsername ?: "user", avatar = senderAvatar)
             },
             replyTo = replyTo,
+            replyDeleted = replyDeleted,
             messageType = messageType,
             text = text,
             attachment = attachment,
@@ -74,6 +76,7 @@ data class MessageEntity(
                 senderUsername = message.sender?.username,
                 senderAvatar = message.sender?.avatar,
                 replyTo = message.replyTo,
+                replyDeleted = message.replyDeleted,
                 messageType = message.messageType,
                 text = message.text,
                 attachment = message.attachment,

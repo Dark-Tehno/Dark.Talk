@@ -1,5 +1,10 @@
 package com.example.ui.chat
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.webkit.MimeTypeMap
+import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.DarkTalkApplication
@@ -11,11 +16,13 @@ import com.example.data.model.WsEvent
 import com.example.data.network.WsConnectionState
 import com.example.data.repository.DarkTalkRepository
 import com.example.data.repository.Resource
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
@@ -31,6 +38,7 @@ data class ChatRoomUiState(
     val typingUserIds: Set<Long> = emptySet(),
     val replyingTo: Message? = null,
     val editingMessage: Message? = null,
+    val chatWallpaper: String? = null,
     val errorMessage: String? = null
 )
 
@@ -39,7 +47,11 @@ class ChatRoomViewModel(
     private val repository: DarkTalkRepository
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(ChatRoomUiState())
+    private val _uiState = MutableStateFlow(
+        ChatRoomUiState(
+            chatWallpaper = repository.preferencesManager.getChatWallpaper(chatId)
+        )
+    )
     val uiState: StateFlow<ChatRoomUiState> = _uiState.asStateFlow()
 
     val currentUserId: Long get() = repository.preferencesManager.userId
@@ -248,9 +260,8 @@ class ChatRoomViewModel(
 
     private fun markDeletedLocally(messageId: Long) {
         _uiState.update { state ->
-            state.copy(messages = state.messages.map {
-                if (it.id == messageId) it.copy(isDeleted = true, text = "", attachment = null, attachmentName = null, attachmentSize = null) else it
-            })
+            // сервер удаляет сообщение полностью: просто убираем его из списка
+            state.copy(messages = state.messages.filterNot { it.id == messageId })
         }
     }
 
@@ -459,6 +470,41 @@ class ChatRoomViewModel(
         }
     }
 
+    fun openFile(context: Context, rawUrl: String, fileName: String, messageId: Long) {
+        val filesDir = DarkTalkApplication.instance.cacheDir.resolve("files_cache")
+        filesDir.mkdirs()
+        val safeName = "${messageId}_${fileName.replace("[^a-zA-Z0-9._-]".toRegex(), "_")}"
+        val targetFile = filesDir.resolve(safeName)
+
+        viewModelScope.launch {
+            val success = repository.downloadAuthenticatedFile(rawUrl, targetFile)
+            if (success) {
+                try {
+                    val uri = FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        targetFile
+                    )
+                    val ext = targetFile.extension.lowercase()
+                    val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+                        ?: context.contentResolver.getType(uri)
+                        ?: "*/*"
+
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, mimeType)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(Intent.createChooser(intent, fileName))
+                } catch (e: Exception) {
+                    _uiState.update { it.copy(errorMessage = "Could not open file: ${e.localizedMessage}") }
+                }
+            } else {
+                _uiState.update { it.copy(errorMessage = "Failed to download file") }
+            }
+        }
+    }
+
     fun getCustomReactionEmojis(): List<String> {
         val raw = repository.preferencesManager.customReactionEmojis
         return raw.split(",").map { it.trim() }.filter { it.isNotBlank() }.ifEmpty {
@@ -468,6 +514,31 @@ class ChatRoomViewModel(
 
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
+    }
+
+    fun setChatWallpaper(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            runCatching {
+                val bytes = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                }
+                if (bytes != null) {
+                    val wallpaperDir = DarkTalkApplication.instance.cacheDir.resolve("wallpapers_cache")
+                    wallpaperDir.mkdirs()
+                    val wallpaperFile = wallpaperDir.resolve("chat_${chatId}_wallpaper.jpg")
+                    withContext(Dispatchers.IO) {
+                        wallpaperFile.writeBytes(bytes)
+                    }
+                    repository.preferencesManager.setChatWallpaper(chatId, wallpaperFile.absolutePath)
+                    _uiState.update { it.copy(chatWallpaper = wallpaperFile.absolutePath) }
+                }
+            }
+        }
+    }
+
+    fun removeChatWallpaper() {
+        repository.preferencesManager.setChatWallpaper(chatId, null)
+        _uiState.update { it.copy(chatWallpaper = null) }
     }
 
     override fun onCleared() {

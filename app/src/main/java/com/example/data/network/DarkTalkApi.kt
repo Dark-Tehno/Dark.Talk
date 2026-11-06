@@ -16,6 +16,10 @@ interface DarkTalkApi {
     @GET("call/api/ice-servers/")
     suspend fun getIceServers(): Response<IceServersResponse>
 
+    // Групповые звонки: идёт ли звонок в чате
+    @GET("call/api/active/")
+    suspend fun getActiveCall(@Query("chat_id") chatId: Long): Response<ActiveCallResponse>
+
     // Account API
     @POST("account/api/auth/register/")
     suspend fun register(@Body request: RegisterRequest): Response<AuthResponse>

@@ -58,15 +58,21 @@ class MainActivity : ComponentActivity() {
         val repository = app.repository
 
         setContent {
-            // Реактивная тема и реактивный язык приложения
+            // Реактивная тема, шрифт и реактивный язык приложения
             val themeName by repository.preferencesManager.appThemeFlow.collectAsState()
             val userLanguage by repository.preferencesManager.userLanguageFlow.collectAsState()
+            val fontType by repository.preferencesManager.appFontFlow.collectAsState()
+            val customFontPath by repository.preferencesManager.customFontPathFlow.collectAsState()
             val translations = remember(userLanguage) { getTranslations(userLanguage) }
 
             CompositionLocalProvider(
                 LocalAppStrings provides translations
             ) {
-                DarkTalkTheme(themeName = themeName) {
+                DarkTalkTheme(
+                    themeName = themeName,
+                    fontType = fontType,
+                    customFontPath = customFontPath
+                ) {
                     GlassBackdrop {
                         Surface(
                             modifier = Modifier.fillMaxSize(),
